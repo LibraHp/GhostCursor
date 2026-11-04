@@ -1,4 +1,5 @@
 import type { GhostBridge, HostEvent, Signal } from '../shared/protocol';
+import { DEFAULT_VIDEO, VIDEO_PRESETS, videoConstraints, type VideoSettings } from '../shared/settings';
 
 type Peer = { pc: RTCPeerConnection; channel: RTCDataChannel; candidates: RTCIceCandidateInit[]; chain: Promise<void> };
 export class HostMedia {
@@ -6,19 +7,47 @@ export class HostMedia {
   private waiting = new Set<string>();
   private stream?: MediaStream;
   private unsubscribe: () => void;
+  private settings: VideoSettings = { ...DEFAULT_VIDEO };
+  private configuring: Promise<void> = Promise.resolve();
   constructor(private api: GhostBridge, private onError: (text: string) => void) {
     this.unsubscribe = api.onEvent(event => this.event(event));
   }
   async capture() {
-    this.stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false });
+    const state = await this.api.state();
+    this.settings = state.video;
+    this.stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60, max: 60 }, cursor: 'never' } as MediaTrackConstraints, audio: false });
     const track = this.stream.getVideoTracks()[0];
     track.contentHint = 'detail';
     track.addEventListener('ended', () => { void this.api.stop(); this.stop(); }, { once: true });
-    const state = await this.api.state();
+    await this.configure(state.video);
     for (const v of state.visitors) this.waiting.add(v.id);
     for (const id of this.waiting) void this.connect(id);
     this.waiting.clear();
     return this.stream;
+  }
+  configure(value: VideoSettings) {
+    const work = this.configuring.catch(() => {}).then(async () => {
+      const previous = this.settings;
+      try {
+        await this.stream?.getVideoTracks()[0]?.applyConstraints(videoConstraints(value));
+        for (const peer of this.peers.values()) await this.configureSender(peer.pc, value);
+        this.settings = { ...value };
+      } catch (error) {
+        await this.stream?.getVideoTracks()[0]?.applyConstraints(videoConstraints(previous)).catch(() => {});
+        for (const peer of this.peers.values()) await this.configureSender(peer.pc, previous).catch(() => {});
+        throw new Error(`画质切换失败：${(error as Error).message}`);
+      }
+    });
+    this.configuring = work; return work;
+  }
+  private async configureSender(pc: RTCPeerConnection, value: VideoSettings) {
+    for (const sender of pc.getSenders().filter(s => s.track?.kind === 'video')) {
+      const params = sender.getParameters();
+      if (!params.encodings?.length) continue;
+      for (const encoding of params.encodings) { encoding.maxBitrate = VIDEO_PRESETS[value.preset].bitrate; encoding.maxFramerate = value.fps; }
+      params.degradationPreference = 'maintain-resolution';
+      await sender.setParameters(params);
+    }
   }
   private event(event: HostEvent) {
     if (event.type === 'visitor-joined') { if (this.stream) void this.connect(event.visitor.id); else this.waiting.add(event.visitor.id); }
@@ -39,7 +68,10 @@ export class HostMedia {
       try { this.api.pointer(id, JSON.parse(event.data)); } catch {}
     };
     pc.onicecandidate = event => { if (event.candidate) this.api.signal(id, { type: 'ice', data: event.candidate.toJSON() }); };
-    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') void this.api.disconnect(id); };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed') void this.api.disconnect(id);
+      if (pc.connectionState === 'connected') void this.configureSender(pc, this.settings).catch(e => this.onError((e as Error).message));
+    };
     for (const track of this.stream.getTracks()) pc.addTrack(track, this.stream);
     try {
       const offer = await pc.createOffer(); await pc.setLocalDescription(offer);

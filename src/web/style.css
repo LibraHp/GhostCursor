@@ -1,6 +1,7 @@
 * { box-sizing: border-box; }
 :root { font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #24334a; background: #f3f5fa; font-synthesis: none; -webkit-font-smoothing: antialiased; }
-body { margin: 0; }
+body { margin: 0; -webkit-user-select: none; user-select: none; }
+input, textarea, [contenteditable]:not([contenteditable="false"]) { -webkit-user-select: text; user-select: text; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #c4cedd; border-radius: 6px; }
@@ -109,6 +110,33 @@ kbd { font-family: inherit; font-size: 10px; display: inline-block; padding: 4px
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 0; border-bottom: 1px solid #edf0f5; }
 .setting-row p { margin-top: 8px; color: #94a0b4; font-size: 11px; }
 .setting-input { display: flex; gap: 8px; max-width: 290px; }
+.capture-probe { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: -10px; }
+.share-quality { padding: 0 18px 14px; }
+.video-controls { display: flex; gap: 8px; flex-shrink: 0; }
+.video-controls .ant-select { min-width: 132px; }
+.video-controls .ant-select:last-child { min-width: 112px; }
+.share-quality .ant-select { height: 30px; font-size: 11px; }
+.hotkey-recorder { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.hotkey-recorder .ant-btn { min-width: 220px; height: 44px; gap: 6px; }
+.hotkey-recorder .ant-btn > span { display: inline-flex; align-items: center; gap: 6px; }
+.hotkey-recorder em { font-size: 10px; font-style: normal; color: #aab5c6; }
+.hotkey-recorder small { color: #9aa7bc; font-size: 10px; }
+.hotkey-recorder .recording { border-color: #4f8afa; background: #eff5ff; color: #2563eb; box-shadow: 0 0 0 3px #2563eb12; }
+.cursor-setting { padding-bottom: 24px; border-bottom: 1px solid #edf0f5; }
+.cursor-setting .setting-row { border: 0; }
+.cursor-preview { position: relative; width: 180px; height: 100px; border: 1px solid #e6ebf3; border-radius: 10px; background: radial-gradient(#d7e2f5 1px, transparent 1px); background-size: 9px 9px; flex-shrink: 0; }
+.cursor-preview .named-cursor { left: 58px; top: 26px; }
+.cursor-options { display: grid; grid-template-columns: 60px minmax(0, 1fr); align-items: center; gap: 18px; font-size: 12px; }
+.cursor-options > label { color: #8796ad; }
+.cursor-color { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cursor-style-note { font-size: 11px; color: #98a6ba; margin-top: 22px; }
+.named-cursor { position: absolute; pointer-events: none; z-index: 2; display: block; }
+.cursor-glyph { position: absolute; left: 0; top: 0; overflow: visible; filter: drop-shadow(0 1px 1px #0f204533); }
+.cursor-arrow .cursor-glyph { transform: translate(-6.25%, -6.25%); }
+.cursor-ring .cursor-glyph, .cursor-crosshair .cursor-glyph { transform: translate(-50%, -50%); }
+.cursor-name { position: absolute; left: 8px; color: #fff; font-size: 11px; line-height: 1.5; border-radius: 5px; padding: 3px 7px; white-space: nowrap; max-width: 150px; text-overflow: ellipsis; overflow: hidden; box-shadow: 0 2px 6px #162d5020; }
+.single-cursor video { cursor: none; }
+.viewer-quality { margin-left: auto; white-space: nowrap; font-size: 10px; color: #8c9eb8; }
 .settings-panel > .ant-alert { margin-top: 24px; }
 .help-panel { margin-top: 18px; padding: 25px; display: flex; gap: 18px; }
 .help-panel > .anticon { font-size: 24px; color: #7a9cda; }

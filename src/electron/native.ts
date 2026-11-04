@@ -59,5 +59,14 @@ export class NativeBridge extends EventEmitter {
       }
     });
   }
-  close() { try { this.send('shutdown'); } catch {} this.socket?.end(); this.child?.kill(); }
+  close() {
+    try { this.send('shutdown'); } catch {}
+    this.socket?.end();
+    // Let the helper restore cursor visibility and release pressed buttons before exit.
+    const child = this.child;
+    if (child && child.exitCode === null) {
+      const timeout = setTimeout(() => child.kill(), 2000); timeout.unref();
+      child.once('exit', () => clearTimeout(timeout));
+    }
+  }
 }

@@ -1,7 +1,7 @@
 import { _electron, chromium } from 'playwright';
 import { expect } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 await mkdir('artifacts', { recursive: true });
@@ -9,6 +9,8 @@ const env = { ...process.env, GHOSTCURSOR_E2E: '1' }; delete env.ELECTRON_RUN_AS
 const application = await _electron.launch({ ...(process.env.GHOSTCURSOR_EXECUTABLE ? { executablePath: resolve(process.env.GHOSTCURSOR_EXECUTABLE), args: [] } : { args: ['.'] }), env, timeout: 30_000 });
 let browser;
 const errors = [];
+const resultPath = process.env.GHOSTCURSOR_CRASH_TEST ? 'artifacts/smoke-crash-result.json' : 'artifacts/smoke-result.json';
+const waitState = (predicate, timeout = 15000) => expect.poll(async () => predicate(await (await application.firstWindow()).evaluate(() => window.ghost.state())), { timeout }).toBe(true);
 const probe = (hotkey = false, focus = false) => {
   const p = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('tests/native-probe.ps1'), ...(focus || hotkey ? ['-Focus'] : []), ...(hotkey ? ['-Hotkey'] : [])], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
   if (p.status !== 0) throw Error(p.stderr || 'Native probe failed');
@@ -17,7 +19,28 @@ const probe = (hotkey = false, focus = false) => {
 try {
   const host = await application.firstWindow(); host.on('pageerror', e => errors.push(e.message));
   host.on('console', msg => { if (msg.type() === 'error') { errors.push(msg.text()); console.log('HOST ERROR', msg.text()); } });
-  await host.waitForFunction(async () => (await window.ghost.state()).nativeReady, { timeout: 20000 });
+  await waitState(s => s.nativeReady, 20000);
+  await host.locator('.nav-item').filter({ hasText: '设置' }).click();
+  const recorder = host.getByRole('button', { name: '录制控制快捷键' });
+  await host.bringToFront();
+  await recorder.click(); await expect(recorder).toContainText('请按下快捷键'); await host.keyboard.press('Control+Shift+F9');
+  await waitState(s => s.hotkey === 'Ctrl+Shift+F9');
+  console.log('Recorded shortcut:', (await host.evaluate(() => window.ghost.state())).hotkey);
+  await recorder.click(); await expect(recorder).toContainText('请按下快捷键'); await host.keyboard.press('Escape');
+  expect((await host.evaluate(() => window.ghost.state())).hotkey).toBe('Ctrl+Shift+F9');
+  await recorder.click(); await expect(recorder).toContainText('请按下快捷键'); await host.keyboard.press('Control+Alt+F8');
+  await waitState(s => s.hotkey === 'Ctrl+Alt+F8');
+  await host.locator('.ant-radio-button-wrapper').filter({ hasText: '十字' }).click();
+  await waitState(s => s.cursor.shape === 'crosshair');
+  await host.locator('.ant-segmented-item').filter({ hasText: '大' }).click();
+  await waitState(s => s.cursor.size === 44);
+  await host.getByText('自定义', { exact: true }).click();
+  await waitState(s => s.cursor.color === '#2563eb');
+  await host.evaluate(() => window.ghost.setCursor({ shape: 'crosshair', size: 44, color: '#8b5cf6' }));
+  await expect(host.locator('.cursor-preview .cursor-glyph')).toHaveAttribute('width', '44');
+  await expect(host.locator('.cursor-preview .named-cursor')).toHaveCSS('color', 'rgb(139, 92, 246)');
+  await host.screenshot({ path: 'artifacts/settings.png' });
+  await host.locator('.nav-item').filter({ hasText: '窗口共享' }).click();
   await host.screenshot({ path: 'artifacts/host.png' });
   const targetId = await application.evaluate(async ({ BrowserWindow }) => {
     const target = new BrowserWindow({ x: 30, y: 60, width: 640, height: 480, frame: true, title: 'GhostCursor Test Window', webPreferences: { nodeIntegration: false, contextIsolation: true } });
@@ -45,8 +68,51 @@ try {
   await viewer.waitForFunction(() => { const v = document.querySelector('video'); return v && v.videoWidth > 0 && v.getVideoPlaybackQuality().totalVideoFrames >= 3; }, { timeout: 20000 });
   await viewer.screenshot({ path: 'artifacts/viewer-live.png' });
   console.log('PASS Browser decodes live WebRTC video and opens the pointer channel.');
+  const originalSession = state.sessionId;
+  const choose = async (label, option) => {
+    await host.getByRole('combobox', { name: label }).click();
+    await host.getByTitle(option, { exact: true }).click();
+  };
+  const captureSettings = () => host.locator('.capture-probe').evaluate(v => {
+    const track = v.srcObject.getVideoTracks()[0]; return { settings: track.getSettings(), constraints: track.getConstraints() };
+  });
+  await host.locator('.nav-item').filter({ hasText: '设置' }).click();
+  await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).setSize(1100, 780), targetId);
+  await choose('画质预设', '流畅 · 720p');
+  await waitState(s => s.video.preset === 'smooth' && s.video.fps === 15);
+  await expect(viewer.locator('.viewer-quality')).toHaveText('流畅 · 15 帧/秒');
+  await expect.poll(async () => (await captureSettings()).settings.height).toBeLessThanOrEqual(720);
+  expect((await captureSettings()).constraints.frameRate.max).toBe(15);
+  await choose('画质预设', '超清 · 1440p');
+  await waitState(s => s.video.preset === 'ultra' && s.video.fps === 60);
+  await expect.poll(async () => (await captureSettings()).settings.height).toBeGreaterThan(720);
+  await choose('共享帧率', '24 帧/秒');
+  await waitState(s => s.video.fps === 24);
+  expect((await captureSettings()).constraints.frameRate.max).toBe(24);
+  await expect(viewer.locator('.viewer-quality')).toHaveText('超清 · 24 帧/秒');
+  expect((await host.evaluate(() => window.ghost.state())).sessionId).toBe(originalSession);
+  await expect(viewer.getByText('已连接', { exact: true })).toBeVisible();
   await focusTarget();
-  await host.waitForFunction(async () => (await window.ghost.state()).targetAvailable, { timeout: 10000 });
+  await waitState(s => s.targetAvailable);
+  const liveFrame = await host.evaluate(() => window.ghost.diagnostics());
+  expect(liveFrame.frameWidth).toBe((await captureSettings()).settings.width);
+  expect(liveFrame.cursorShape).toBe('crosshair'); expect(liveFrame.cursorSize).toBe(44); expect(liveFrame.cursorColor).toBe('#8b5cf6');
+  const profile = await application.evaluate(({ app }) => app.getPath('userData'));
+  const savedSettings = JSON.parse(await readFile(resolve(profile, 'settings.json'), 'utf8'));
+  expect(savedSettings).toMatchObject({ hotkey: 'Ctrl+Alt+F8', video: { preset: 'ultra', fps: 24 }, cursor: { shape: 'crosshair', size: 44, color: '#8b5cf6' } });
+  await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).setSize(640, 480), targetId);
+  await choose('画质预设', '高清 · 1080p');
+  await waitState(s => s.video.preset === 'hd' && s.video.fps === 30);
+  await host.locator('.nav-item').filter({ hasText: '窗口共享' }).click();
+  console.log('PASS Live presets/FPS change capture constraints and viewer presentation without replacing the session; styling and recorded shortcut persist.');
+  const observer = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  observer.on('pageerror', e => errors.push(e.message));
+  await observer.goto(state.links.find(s => s.includes('127.0.0.1')));
+  await observer.getByLabel('如何称呼你').fill('旁观访客');
+  await observer.getByRole('button', { name: '加入共享' }).click();
+  await expect(observer.getByText('已连接', { exact: true })).toBeVisible({ timeout: 25000 });
+  await focusTarget();
+  await waitState(s => s.targetAvailable, 10000);
   const before = await host.evaluate(() => window.ghost.diagnostics());
   const box = await viewer.locator('video').boundingBox();
   const x = box.x + box.width / 2, y = box.y + box.height / 2;
@@ -63,18 +129,35 @@ try {
   console.log('PASS Native marker is visible; unauthorized movement/clicks leave system input untouched.');
   await host.evaluate(async () => { const s = await window.ghost.state(); await window.ghost.selectController(s.visitors[0].id); });
   await host.getByRole('button', { name: '开启控制' }).click();
-  await host.waitForFunction(async () => (await window.ghost.state()).controlEnabled);
+  await waitState(s => s.controlEnabled);
   await expect(viewer.getByText('你已获得鼠标控制权限')).toBeVisible();
   const previousDowns = await targetPage.evaluate(() => window.__downs);
   await viewer.mouse.click(x, y);
   await expect.poll(() => targetPage.evaluate(() => window.__downs)).toBeGreaterThan(previousDowns);
   expect((await host.evaluate(() => window.ghost.diagnostics())).successfulInputs).toBeGreaterThan(before.successfulInputs);
+  await expect.poll(() => probe().cursorVisible).toBe(false);
+  await expect(viewer.locator('.controller-cursor')).toHaveCount(1);
+  await expect(viewer.locator('.controller-cursor .cursor-name')).toHaveText('验收访客');
+  await expect(viewer.locator('.controller-cursor')).toHaveClass(/cursor-crosshair/);
+  await expect(viewer.locator('.controller-cursor .cursor-glyph')).toHaveAttribute('width', '44');
+  await expect(viewer.locator('.controller-cursor')).toHaveCSS('color', 'rgb(139, 92, 246)');
+  await expect(observer.locator('.controller-cursor .cursor-name')).toHaveText('验收访客');
+  await observer.mouse.move(x - 20, y);
+  await expect.poll(async () => (await host.evaluate(() => window.ghost.diagnostics())).visibleMarkers).toBe(1);
+  const atControl = await targetPage.evaluate(() => window.__downs);
+  await observer.mouse.click(x - 20, y);
+  expect(await targetPage.evaluate(() => window.__downs)).toBe(atControl);
+  await observer.close();
+  expect(await viewer.locator('video').evaluate(el => getComputedStyle(el).cursor)).toBe('none');
+  await viewer.screenshot({ path: 'artifacts/single-cursor.png' });
+  console.log('PASS Exactly one named controller marker is shown; native system pointer and browser pointer are hidden.');
   await viewer.mouse.wheel(0, 120);
   await expect.poll(() => targetPage.evaluate(() => window.__wheels)).toBeGreaterThan(0);
   await focusTarget();
   probe(true);
-  await host.waitForFunction(async () => !(await window.ghost.state()).controlEnabled);
+  await waitState(s => !s.controlEnabled);
   await expect(viewer.getByText('观看与位置标记')).toBeVisible();
+  await expect.poll(() => probe().cursorVisible).toBe(true);
   const revokedInputs = (await host.evaluate(() => window.ghost.diagnostics())).successfulInputs;
   await viewer.mouse.click(x, y);
   expect((await host.evaluate(() => window.ghost.diagnostics())).successfulInputs).toBe(revokedInputs);
@@ -83,28 +166,29 @@ try {
   await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).setSize(720, 520), targetId);
   await viewer.waitForFunction(old => document.querySelector('video').videoWidth !== old, previousWidth);
   await focusTarget();
-  await host.waitForFunction(async () => (await window.ghost.state()).targetAvailable);
+  await waitState(s => s.targetAvailable);
   await viewer.mouse.move(x - 10, y);
   await expect.poll(async () => (await host.evaluate(() => window.ghost.diagnostics())).visibleMarkers).toBe(1);
   // Bringing the host in front must hide markers and prevent input into it.
   await application.evaluate(({ BrowserWindow }, id) => { for (const w of BrowserWindow.getAllWindows()) if (w.id !== id) { w.show(); w.focus(); } }, targetId);
-  await host.waitForFunction(async () => !(await window.ghost.state()).targetAvailable);
+  await waitState(s => !s.targetAvailable);
   await expect.poll(async () => (await host.evaluate(() => window.ghost.diagnostics())).visibleMarkers).toBe(0);
   await host.screenshot({ path: 'artifacts/host-shared.png' });
   await focusTarget();
-  await host.waitForFunction(async () => (await window.ghost.state()).targetAvailable);
+  await waitState(s => s.targetAvailable);
   expect((await host.evaluate(() => window.ghost.state())).controlEnabled).toBe(false);
   console.log('PASS Resizing updates capture coordinates; background windows hide markers and keep control off.');
   probe(true);
-  await host.waitForFunction(async () => (await window.ghost.state()).controlEnabled);
+  await waitState(s => s.controlEnabled);
   await expect(viewer.getByText('你已获得鼠标控制权限')).toBeVisible();
   await viewer.mouse.move(x, y);
   await viewer.mouse.down();
   await expect.poll(() => probe().leftDown).toBe(true);
   await viewer.close();
-  await host.waitForFunction(async () => (await window.ghost.state()).visitors.length === 0);
+  await waitState(s => s.visitors.length === 0);
   await expect.poll(() => probe().leftDown).toBe(false);
   expect((await host.evaluate(() => window.ghost.state())).controlEnabled).toBe(false);
+  expect(probe().cursorVisible).toBe(true);
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   mobile.on('pageerror', e => errors.push(e.message));
   await mobile.goto(state.links.find(s => s.includes('127.0.0.1')));
@@ -136,19 +220,35 @@ try {
   await touch('touchCancel');
   await expect.poll(() => probe().leftDown).toBe(false);
   await expect.poll(async () => (await host.evaluate(() => window.ghost.diagnostics())).visibleMarkers).toBe(0);
+  if (process.env.GHOSTCURSOR_CRASH_TEST) {
+    // Kill only this test instance's helper, with no injected buttons held.
+    await mobile.mouse.move(mx + 5, my);
+    await expect.poll(() => probe().cursorVisible).toBe(false);
+    const { processId } = await host.evaluate(() => window.ghost.diagnostics());
+    await application.evaluate((_, pid) => process.kill(pid), processId);
+    await waitState(s => !s.nativeReady && !s.sharing);
+    await expect.poll(() => probe().cursorVisible).toBe(true);
+    expect(probe().markers).toBe(0);
+    await writeFile(resultPath, JSON.stringify({ passed: true, checks: ['forced native helper exit restores system cursor and stops sharing'], errors }, null, 2));
+    console.log('PASS Forced helper exit restores the system cursor, removes markers and stops sharing.');
+    if (errors.length) throw Error('Browser errors: ' + errors.join('\n'));
+    process.exitCode = 0;
+  } else {
   await mobile.close();
-  await host.waitForFunction(async () => (await window.ghost.state()).visitors.length === 0);
+  await waitState(s => s.visitors.length === 0);
+  await expect.poll(() => probe().cursorVisible).toBe(true);
   console.log('PASS Mobile touch start/move/end/cancel shows native touch markers, isolates view-only inputs and releases authorized touch drags.');
   await application.evaluate(({ BrowserWindow }, id) => { BrowserWindow.fromId(id).hide(); }, targetId);
   await host.evaluate(() => window.ghost.stop());
-  await host.waitForFunction(async () => !(await window.ghost.state()).sharing);
+  await waitState(s => !s.sharing);
   expect(probe().markers).toBe(0);
   console.log('PASS Disconnect and stop clean up control, held buttons and markers.');
   if (errors.length) throw Error('Browser errors: ' + errors.join('\n'));
-  await writeFile('artifacts/smoke-result.json', JSON.stringify({ passed: true, packaged: !!process.env.GHOSTCURSOR_EXECUTABLE, checks: ['framed-window capture', 'WebRTC video', 'native marker', 'view-only isolation', 'explicit control button', 'native-confirmed grant', 'global shortcut', 'mouse injection', 'wheel', 'revoke', 'resize', 'occlusion', 'held-button disconnect cleanup', 'mobile touch start/move/end/cancel', 'mobile view-only isolation', 'authorized touch drag cleanup'], errors }, null, 2));
+  await writeFile(resultPath, JSON.stringify({ passed: true, packaged: !!process.env.GHOSTCURSOR_EXECUTABLE, checks: ['framed-window capture', 'WebRTC video', 'live quality and FPS', 'recorded and cancelled shortcut', 'persisted presentation', 'native marker styling', 'single named controller cursor', 'observer cursor and input isolation', 'native cursor restoration', 'view-only isolation', 'explicit control button', 'native-confirmed grant', 'global shortcut', 'mouse injection', 'wheel', 'revoke', 'resize', 'occlusion', 'held-button disconnect cleanup', 'mobile touch start/move/end/cancel', 'mobile view-only isolation', 'authorized touch drag cleanup'], errors }, null, 2));
+  }
 } catch (e) {
   try { const host = (await application.windows())[0]; console.log('NATIVE DIAGNOSTICS', await host.evaluate(() => window.ghost.diagnostics()), probe()); } catch {}
   for (const [i, page] of (await application.windows()).entries()) { try { await page.screenshot({ path: `artifacts/failure-${i}.png` }); } catch {} }
-  await writeFile('artifacts/smoke-result.json', JSON.stringify({ passed: false, error: String(e), errors }, null, 2));
+  await writeFile(resultPath, JSON.stringify({ passed: false, error: String(e), errors }, null, 2));
   throw e;
 } finally { await browser?.close(); await application.close(); }

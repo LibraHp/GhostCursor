@@ -32,6 +32,8 @@ internal sealed class Engine(Application app) : IDisposable
     private StreamWriter? writer;
     private readonly Dictionary<string, Marker> markers = [];
     private readonly HashSet<int> buttons = [];
+    private readonly CursorVisibility cursorVisibility = new();
+    private CursorAppearance appearance = new();
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private IntPtr target;
     private uint targetPid;
@@ -65,7 +67,7 @@ internal sealed class Engine(Application app) : IDisposable
                     if (Str(data, "type") == "snapshot")
                     {
                         var available = Available(out _, out var reason);
-                        Reply(new { id, ok = true, successfulInputs = Win.SuccessfulInputs, visibleMarkers = markers.Values.Count(m => m.Window.IsVisible), available, reason, enabled, epoch, frameWidth, frameHeight,
+                        Reply(new { id, ok = true, processId = Environment.ProcessId, successfulInputs = Win.SuccessfulInputs, visibleMarkers = markers.Values.Count(m => m.Window.IsVisible), available, reason, enabled, epoch, frameWidth, frameHeight, cursorHidden = cursorVisibility.Hidden, cursorShape = appearance.Shape, cursorSize = appearance.Size, cursorColor = appearance.Color,
                             markers = markers.Select(m => new { id = m.Key, age = Now - m.Value.LastSeen, visible = m.Value.Window.IsVisible, x = m.Value.X, y = m.Value.Y }).ToArray() });
                         continue;
                     }
@@ -107,6 +109,12 @@ internal sealed class Engine(Application app) : IDisposable
                 lastStatus = ""; Tick(); break;
             case "frame":
                 frameWidth = (int)Num(data, "width"); frameHeight = (int)Num(data, "height"); Tick(); break;
+            case "appearance":
+                var shape = Str(data, "shape"); var size = (int)Num(data, "size"); var color = Str(data, "color");
+                if (shape is not ("arrow" or "ring" or "crosshair") || size is not (24 or 32 or 44) || (color.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$"))) throw new Exception("无效鼠标样式");
+                appearance = new CursorAppearance(shape, size, color.Length > 0 ? color : null);
+                foreach (var item in markers.Values) item.Style(appearance);
+                Tick(); break;
             case "grant":
                 Revoke(); epoch = (long)Num(data, "epoch"); controller = Str(data, "controller");
                 if (Bool(data, "enabled"))
@@ -206,13 +214,13 @@ internal sealed class Engine(Application app) : IDisposable
             if (markers.Count >= 8) return;
             marker = new Marker(Str(data, "name"), Str(data, "color"), target); markers.Add(visitor, marker);
         }
-        marker.SetTouch(touch);
+        marker.Style(appearance); marker.SetTouch(touch);
         marker.X = x; marker.Y = y; marker.LastSeen = Now;
         if (action == "touch-end") { marker.LastSeen = 0; marker.Window.Hide(); return; }
         if (!Available(out var rect, out _)) { Revoke(); marker.Window.Hide(); return; }
         var point = new Win.Point(rect.Left + (int)Math.Round(x * (rect.Width - 1)), rect.Top + (int)Math.Round(y * (rect.Height - 1)));
         if (!PointVisible(point)) { if (inject) Fault("操作位置被其他窗口遮挡，已收回控制；请关闭遮挡窗口后重新授权"); marker.Window.Hide(); return; }
-        marker.Place(point, rect);
+        if (!enabled || visitor == controller) marker.Place(point, rect); else marker.Window.Hide();
         if (!inject) return;
         lastControllerInput = Now;
         if (action == "up")
@@ -246,7 +254,7 @@ internal sealed class Engine(Application app) : IDisposable
     }
     private static bool SendButton(int button, bool down) => Win.SendMouse(0, 0, 0, button switch { 0 => down ? 0x0002u : 0x0004u, 1 => down ? 0x0020u : 0x0040u, 2 => down ? 0x0008u : 0x0010u, _ => 0 });
     private void ReleaseButtons() { foreach (var button in buttons) SendButton(button, false); buttons.Clear(); }
-    private void Revoke() { enabled = false; ReleaseButtons(); }
+    private void Revoke() { enabled = false; ReleaseButtons(); cursorVisibility.Restore(); }
     private const string InputError = "Windows 拒绝鼠标输入。若目标应用以管理员身份运行，请改用普通权限运行目标应用，或手动以相同权限重新启动 GhostCursor";
     private void Fault(string reason)
     {
@@ -261,12 +269,20 @@ internal sealed class Engine(Application app) : IDisposable
         if (!available) Revoke();
         // A lost release event must not leave a system button held indefinitely.
         if (buttons.Count > 0 && Now - lastControllerInput > 1500) ReleaseButtons();
-        foreach (var marker in markers.Values)
+        var showingController = false;
+        foreach (var entry in markers)
         {
+            var marker = entry.Value;
             var p = new Win.Point(rect.Left + (int)(marker.X * Math.Max(0, rect.Width - 1)), rect.Top + (int)(marker.Y * Math.Max(0, rect.Height - 1)));
-            if (!available || Now - marker.LastSeen > 1800 || !PointVisible(p)) marker.Window.Hide();
-            else marker.Place(p, rect);
+            if (enabled && entry.Key == controller && Win.GetCursorPos(out var actual) && rect.Contains(actual.X, actual.Y)) p = actual;
+            if (!available || (enabled && entry.Key != controller) || Now - marker.LastSeen > 1800 || !PointVisible(p)) marker.Window.Hide();
+            else { marker.Place(p, rect); if (enabled && entry.Key == controller) showingController = true; }
         }
+        if (enabled && showingController && Win.GetCursorPos(out var current) && rect.Contains(current.X, current.Y) && PointVisible(current))
+        {
+            if (!cursorVisibility.Hide(target)) Fault("无法接管共享窗口的鼠标显示，已收回控制");
+        }
+        else cursorVisibility.Restore();
         var status = $"{available}:{reason}:{enabled}:{epoch}";
         if (status != lastStatus)
         {
@@ -284,6 +300,8 @@ internal sealed class Engine(Application app) : IDisposable
     public void Dispose() { timer.Stop(); Clear(); pipe?.Dispose(); pipe = null; }
 }
 
+internal sealed record CursorAppearance(string Shape = "arrow", int Size = 32, string? Color = null);
+
 internal sealed class Marker
 {
     public Window Window { get; }
@@ -292,10 +310,16 @@ internal sealed class Marker
     private readonly System.Windows.Shapes.Path cursor;
     private readonly Ellipse touchRing;
     private readonly Ellipse touchDot;
+    private readonly System.Windows.Shapes.Path crosshair;
+    private readonly Border label;
+    private readonly string visitorColor;
+    private bool touch;
+    private CursorAppearance appearance = new();
     public double X, Y;
     public long LastSeen;
     public Marker(string name, string color, IntPtr owner)
     {
+        visitorColor = color;
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
         canvas = new Canvas { Width = 150, Height = 66, IsHitTestVisible = false };
         cursor = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 2,2 L 3,26 L 9,20 L 14,31 L 19,28 L 14,18 L 23,17 Z"), Fill = brush, Stroke = Brushes.White, StrokeThickness = 1.5 };
@@ -305,10 +329,12 @@ internal sealed class Marker
         Canvas.SetLeft(touchRing, -12); Canvas.SetTop(touchRing, -12);
         Canvas.SetLeft(touchDot, -1); Canvas.SetTop(touchDot, -1);
         canvas.Children.Add(touchRing); canvas.Children.Add(touchDot);
-        var label = new Border { Background = brush, CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 3, 7, 3), MaxWidth = 142,
+        crosshair = new System.Windows.Shapes.Path { Data = Geometry.Parse("M2,-13 L2,-3 M2,7 L2,17 M-13,2 L-3,2 M7,2 L17,2"), Stroke = brush, StrokeThickness = 2, Visibility = Visibility.Collapsed };
+        canvas.Children.Add(crosshair);
+        label = new Border { Background = brush, CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 3, 7, 3), MaxWidth = 142,
             Child = new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis } };
         Canvas.SetLeft(label, 5); Canvas.SetTop(label, 33); canvas.Children.Add(label);
-        Window = new Window { Title = "GhostCursor Overlay", Width = 150, Height = 66, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
+        Window = new Window { Title = "GhostCursor Overlay", Width = 190, Height = 116, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
             AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false, ShowActivated = false, Focusable = false, IsHitTestVisible = false, Content = new Canvas { Children = { canvas } } };
         handle = new WindowInteropHelper(Window).EnsureHandle();
         Win.SetWindowLongPtr(handle, -20, new IntPtr(Win.GetWindowLongPtr(handle, -20).ToInt64() | 0x20 | 0x80 | 0x08000000));
@@ -324,23 +350,38 @@ internal sealed class Marker
     }
     public void SetTouch(bool touch)
     {
-        cursor.Visibility = touch ? Visibility.Collapsed : Visibility.Visible;
-        touchRing.Visibility = touchDot.Visibility = touch ? Visibility.Visible : Visibility.Collapsed;
+        this.touch = touch;
+        Refresh();
+    }
+    public void Style(CursorAppearance value) { if (appearance == value) return; appearance = value; Refresh(); }
+    private void Refresh()
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(appearance.Color ?? visitorColor));
+        var shape = touch ? "ring" : appearance.Shape;
+        cursor.Fill = touchDot.Fill = label.Background = brush; touchRing.Stroke = crosshair.Stroke = brush;
+        touchRing.Fill = new SolidColorBrush(Color.FromArgb(45, brush.Color.R, brush.Color.G, brush.Color.B));
+        cursor.Visibility = shape == "arrow" ? Visibility.Visible : Visibility.Collapsed;
+        touchRing.Visibility = shape == "ring" ? Visibility.Visible : Visibility.Collapsed;
+        touchDot.Visibility = shape != "arrow" ? Visibility.Visible : Visibility.Collapsed;
+        crosshair.Visibility = shape == "crosshair" ? Visibility.Visible : Visibility.Collapsed;
+        var scale = appearance.Size / 32.0;
+        foreach (var element in new UIElement[] { cursor, touchRing, touchDot, crosshair }) element.RenderTransform = new ScaleTransform(scale, scale, 2, 2);
+        Canvas.SetTop(label, shape == "arrow" ? appearance.Size + 4 : appearance.Size / 2.0 + 10);
     }
     public void Place(Win.Point point, Win.Rect bounds)
     {
         if (!Window.IsVisible) Window.Show();
         // Clip the drawing at the selected window boundary, including labels at edges.
         var dpi = VisualTreeHelper.GetDpi(Window);
-        const double anchor = 16;
+        const double anchor = 28;
         Canvas.SetLeft(canvas, anchor - 2); Canvas.SetTop(canvas, anchor - 2);
         var left = point.X - (int)Math.Round(anchor * dpi.DpiScaleX);
         var top = point.Y - (int)Math.Round(anchor * dpi.DpiScaleY);
         Win.SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0, 0x0010 | 0x0001 | 0x0004);
         var clipLeft = Math.Max(0, (bounds.Left - left) / dpi.DpiScaleX);
         var clipTop = Math.Max(0, (bounds.Top - top) / dpi.DpiScaleY);
-        var right = Math.Max(clipLeft, Math.Min(150, (bounds.Right - left) / dpi.DpiScaleX));
-        var bottom = Math.Max(clipTop, Math.Min(66, (bounds.Bottom - top) / dpi.DpiScaleY));
+        var right = Math.Max(clipLeft, Math.Min(190, (bounds.Right - left) / dpi.DpiScaleX));
+        var bottom = Math.Max(clipTop, Math.Min(116, (bounds.Bottom - top) / dpi.DpiScaleY));
         Window.Clip = new RectangleGeometry(new Rect(clipLeft, clipTop, right - clipLeft, bottom - clipTop));
     }
 }
@@ -362,6 +403,7 @@ internal static class Win
     [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] internal static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] internal static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hwnd);

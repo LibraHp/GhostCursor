@@ -7,6 +7,7 @@ import { NativeBridge } from './native';
 import { SharingServer } from './server';
 import { ControlCoordinator } from './control';
 import { validSignal, type HostState, type HostEvent } from '../shared/protocol';
+import { DEFAULT_VIDEO, DEFAULT_CURSOR, validVideo, validCursor, validShortcut, type VideoSettings, type CursorSettings } from '../shared/settings';
 
 app.setName('GhostCursor');
 if (process.env.GHOSTCURSOR_E2E) app.setPath('userData', join(app.getPath('temp'), `ghostcursor-e2e-${process.pid}`));
@@ -19,6 +20,15 @@ let sourceId = '', sourceName = '', port = 3210, hotkey = 'Ctrl+Alt+F8';
 let nativeReady = false, targetAvailable = false, error = '', busy = false;
 let quitting = false;
 let nativeReason = '';
+let video: VideoSettings = { ...DEFAULT_VIDEO }, cursor: CursorSettings = { ...DEFAULT_CURSOR };
+let recordingHotkey = false, recordingTimer: NodeJS.Timeout | undefined;
+let settingsWrite = Promise.resolve();
+function persistSettings() {
+  const contents = JSON.stringify({ hotkey, video, cursor });
+  const write = settingsWrite.catch(() => {}).then(() => writeFile(join(app.getPath('userData'), 'settings.json'), contents));
+  settingsWrite = write; return write;
+}
+function presentation() { server.setPresentation({ video, cursor }); }
 const pendingMoves = new Map<string, { message: object; at: number }>();
 const rates = new Map<string, { start: number; count: number }>();
 const controls = new ControlCoordinator(sharing, { request: (type, payload) => native.request(type, payload), send: sendNative }, () => { server.broadcastState(); publish(); });
@@ -27,7 +37,7 @@ function state(): HostState {
   const hosts = ['127.0.0.1', ...Object.values(networkInterfaces()).flatMap(items => items || []).filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address)];
   return { sharing: sharing.active, sessionId: sharing.id, visitors: [...sharing.visitors.values()], controller: sharing.controller,
     controlEnabled: sharing.enabled, epoch: sharing.epoch, links: sharing.active ? [...new Set(hosts)].map(host => `http://${host}:${port}/#${sharing.token}`) : [],
-    controlPending: controls.pending, controlReason: sharing.controlReason,
+    controlPending: controls.pending, controlReason: sharing.controlReason, video, cursor,
     port, sourceName, hotkey, nativeReady, targetAvailable, error: error || (sharing.active ? nativeReason : '') };
 }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', state()); }
@@ -50,12 +60,16 @@ async function stop() {
   sendNative('clear'); server.broadcastState(); publish(); await server.stop();
 }
 function registerHotkey(value: string) {
+  if (!validShortcut(value)) throw new Error('请按下带修饰键的组合，例如 Ctrl+Alt+F8');
   if (value === hotkey && globalShortcut.isRegistered(hotkey)) return;
-  if (!/^((Ctrl|Alt|Shift|Super)\+){1,3}(F([1-9]|1[0-9]|2[0-4])|[A-Z0-9])$/.test(value)) throw new Error('请输入组合快捷键，例如 Ctrl+Alt+F8');
   const old = hotkey;
   if (!globalShortcut.register(value, () => { void toggle().catch(e => { error = (e as Error).message; }).finally(publish); })) throw new Error('快捷键已被占用，请换一个组合');
   hotkey = value;
   if (old !== value) globalShortcut.unregister(old);
+}
+function finishRecording() {
+  clearTimeout(recordingTimer); recordingHotkey = false;
+  try { registerHotkey(hotkey); } catch (e) { error = (e as Error).message; publish(); }
 }
 async function sources() {
   const list = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 400, height: 240 }, fetchWindowIcons: false });
@@ -105,7 +119,27 @@ app.whenReady().then(async () => {
   handle('select-controller', (id: string | null) => { if (id !== null && typeof id !== 'string') throw new Error('无效访客'); error = ''; sharing.select(id); syncGrant(); });
   handle('toggle-control', toggle);
   handle('disconnect', (id: string) => { if (typeof id === 'string') server.disconnect(id); });
-  handle('set-hotkey', async (value: string) => { registerHotkey(value); await writeFile(join(app.getPath('userData'), 'settings.json'), JSON.stringify({ hotkey })); publish(); });
+  handle('set-hotkey', async (value: string) => {
+    try { registerHotkey(value); recordingHotkey = false; clearTimeout(recordingTimer); await persistSettings(); publish(); }
+    catch (e) { finishRecording(); throw e; }
+  });
+  handle('record-hotkey', (recording: boolean) => {
+    if (typeof recording !== 'boolean') throw new Error('无效录制状态');
+    if (!recording) { finishRecording(); return; }
+    if (sharing.enabled || controls.pending) controls.revoke('正在录制快捷键，已收回控制');
+    recordingHotkey = true; globalShortcut.unregister(hotkey); clearTimeout(recordingTimer);
+    recordingTimer = setTimeout(finishRecording, 30_000);
+  });
+  window.on('blur', () => { if (recordingHotkey) finishRecording(); });
+  handle('set-video', async (value: VideoSettings) => {
+    if (!validVideo(value)) throw new Error('无效画质或帧率');
+    video = { preset: value.preset, fps: value.fps }; await persistSettings(); presentation(); publish();
+  });
+  handle('set-cursor', async (value: CursorSettings) => {
+    if (!validCursor(value)) throw new Error('无效鼠标样式');
+    const next = { shape: value.shape, size: value.size, color: value.color };
+    await native.request('appearance', next); cursor = next; await persistSettings(); presentation(); publish();
+  });
   handle('copy', (value: string) => { if (typeof value === 'string' && value.length < 4096) clipboard.writeText(value); });
   on('signal', (id, signal) => { if (typeof id === 'string' && sharing.visitors.has(id) && validSignal(signal)) server.signal(id, signal); });
   on('frame-size', (width, height) => { if (sharing.active && Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 && width <= 16384 && height <= 16384) sendNative('frame', { width, height }); });
@@ -118,12 +152,16 @@ app.whenReady().then(async () => {
     const { type, ...coordinates } = accepted.message;
     const payload = { visitor: id, name: visitor.name, color: visitor.color, ...coordinates, action: type, inject: accepted.inject, sentAt: now };
     if (accepted.message.type === 'pointer') pendingMoves.set(id, { message: payload, at: now });
-    else { pendingMoves.delete(id); sendNative('pointer', payload); }
+    else { pendingMoves.delete(id); sendNative('pointer', payload); server.cursor(id, { ...coordinates, visible: !['leave', 'release', 'touch-end'].includes(type) }); }
   });
   on('close', () => window.close()); on('minimize', () => window.minimize());
   const ticker = setInterval(() => {
     const moves = [...pendingMoves.values()]; pendingMoves.clear();
-    for (const move of moves) if (Date.now() - move.at < 100) sendNative('pointer', move.message);
+    for (const move of moves) if (Date.now() - move.at < 100) {
+      sendNative('pointer', move.message);
+      const p = move.message as { visitor: string; x: number; y: number; pointerType: string };
+      server.cursor(p.visitor, { x: p.x, y: p.y, pointerType: p.pointerType, visible: true });
+    }
   }, 16); ticker.unref();
   native.on('status', status => {
     targetAvailable = !!status.available; nativeReason = status.reason || '';
@@ -144,10 +182,14 @@ app.whenReady().then(async () => {
   try {
     const settings = JSON.parse(await readFile(join(app.getPath('userData'), 'settings.json'), 'utf8'));
     if (typeof settings.hotkey === 'string') hotkey = settings.hotkey;
+    if (validVideo(settings.video)) video = settings.video;
+    if (validCursor(settings.cursor)) cursor = settings.cursor;
   } catch {}
+  if (!validShortcut(hotkey)) hotkey = 'Ctrl+Alt+F8';
   try { registerHotkey(hotkey); } catch (e) { error = (e as Error).message; }
+  presentation();
   await window.loadFile(join(webRoot, 'index.html'));
-  try { await native.launch(app.isPackaged ? join(process.resourcesPath, 'native/GhostCursor.Native.exe') : join(__dirname, '../native/GhostCursor.Native.exe')); nativeReady = true; }
+  try { await native.launch(app.isPackaged ? join(process.resourcesPath, 'native/GhostCursor.Native.exe') : join(__dirname, '../native/GhostCursor.Native.exe')); await native.request('appearance', cursor); nativeReady = true; }
   catch (e) { error = `原生组件启动失败：${(e as Error).message}`; }
   publish();
 });

@@ -1,9 +1,12 @@
+import type { VideoSettings, CursorSettings } from './settings';
+
 export interface WindowSource { id: string; name: string; thumbnail: string }
 export interface Visitor { id: string; name: string; color: string; connectedAt: number }
 export interface HostState {
   sharing: boolean; sessionId: string; visitors: Visitor[]; controller: string | null;
   controlEnabled: boolean; epoch: number; links: string[]; port: number;
   controlPending: boolean; controlReason: string;
+  video: VideoSettings; cursor: CursorSettings;
   sourceName: string; hotkey: string; nativeReady: boolean; targetAvailable: boolean; error: string;
 }
 export type PointerMessage = {
@@ -20,6 +23,9 @@ export interface GhostBridge {
   start(options: { sourceId: string; port: number }): Promise<HostState>;
   stop(): Promise<void>; selectController(id: string | null): Promise<void>;
   toggleControl(): Promise<void>; setHotkey(value: string): Promise<void>;
+  recordHotkey(recording: boolean): Promise<void>;
+  setVideo(value: VideoSettings): Promise<void>;
+  setCursor(value: CursorSettings): Promise<void>;
   disconnect(id: string): Promise<void>;
   diagnostics(): Promise<{ successfulInputs: number; visibleMarkers: number; available: boolean; reason: string }>;
   signal(id: string, signal: Signal): void; pointer(id: string, message: unknown): void;

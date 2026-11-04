@@ -8,6 +8,9 @@ using System.Text;
 public static class GhostProbe {
   public delegate bool Callback(IntPtr h, IntPtr p);
   [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct CursorInfo { public int Size; public uint Flags; public IntPtr Cursor; public Point Position; }
+  [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CursorInfo info);
+  public static bool CursorVisible() { var info=new CursorInfo{Size=Marshal.SizeOf(typeof(CursorInfo))};return GetCursorInfo(ref info)&&(info.Flags&1)!=0; }
   [DllImport("user32.dll")] public static extern bool EnumWindows(Callback c, IntPtr p);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
@@ -36,4 +39,4 @@ public static class GhostProbe {
 '@
 if ($Focus) { [GhostProbe]::FocusTarget() }
 if ($Hotkey) { [GhostProbe]::Toggle() }
-@{ foreground = [GhostProbe]::Title([GhostProbe]::GetForegroundWindow()); markers = [GhostProbe]::Markers(); cursor = [GhostProbe]::Cursor(); leftDown = ([GhostProbe]::GetAsyncKeyState(1) -band 0x8000) -ne 0 } | ConvertTo-Json -Compress
+@{ foreground = [GhostProbe]::Title([GhostProbe]::GetForegroundWindow()); markers = [GhostProbe]::Markers(); cursor = [GhostProbe]::Cursor(); cursorVisible = [GhostProbe]::CursorVisible(); leftDown = ([GhostProbe]::GetAsyncKeyState(1) -band 0x8000) -ne 0 } | ConvertTo-Json -Compress

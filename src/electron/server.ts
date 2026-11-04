@@ -6,11 +6,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
 import { validSignal, type Signal } from '../shared/protocol';
 import { Session } from './session';
+import { DEFAULT_CURSOR, DEFAULT_VIDEO, type Presentation } from '../shared/settings';
 
 const colors = ['#2563eb', '#8b5cf6', '#e65580', '#059669', '#d97706', '#0891b2', '#6366f1', '#dc2626'];
 export class SharingServer extends EventEmitter {
   private http?: Server; private wss?: WebSocketServer;
   private clients = new Map<string, WebSocket>();
+  private presentation: Presentation = { video: DEFAULT_VIDEO, cursor: DEFAULT_CURSOR };
   constructor(private session: Session, private webRoot: string) { super(); }
   async start(port: number) {
     const server = createServer(async (req, res) => {
@@ -60,7 +62,8 @@ export class SharingServer extends EventEmitter {
             const color = colors.find(c => !used.has(c)) || colors[0];
             const visitor = { id, name: name || `访客 ${this.clients.size + 1}`, color, connectedAt: Date.now() };
             this.clients.set(id, ws); this.session.visitors.set(id, visitor);
-            this.send(id, { type: 'welcome', id, color, sessionId: this.session.id });
+            this.send(id, { type: 'welcome', id, name: visitor.name, color, sessionId: this.session.id });
+            this.send(id, { type: 'presentation', ...this.presentation });
             this.emit('join', visitor); this.broadcastState();
           } else if (validSignal(data)) this.emit('signal', id, data);
           else ws.close(4002, '无效信令');
@@ -79,6 +82,15 @@ export class SharingServer extends EventEmitter {
   send(id: string, message: object) { const ws = this.clients.get(id); if (ws?.readyState === WebSocket.OPEN) { if (ws.bufferedAmount > 256_000) ws.terminate(); else ws.send(JSON.stringify(message)); } }
   signal(id: string, signal: Signal) { if (validSignal(signal)) this.send(id, signal); }
   disconnect(id: string) { this.clients.get(id)?.close(4000, '主持人已断开你的连接'); }
+  setPresentation(value: Presentation) {
+    this.presentation = value;
+    for (const id of this.clients.keys()) this.send(id, { type: 'presentation', ...value });
+  }
+  cursor(id: string, position: { x?: number; y?: number; pointerType?: string; visible: boolean }) {
+    if (!this.session.enabled || this.session.controller !== id) return;
+    const visitor = this.session.visitors.get(id); if (!visitor) return;
+    for (const client of this.clients.keys()) this.send(client, { type: 'controller-cursor', id, name: visitor.name, color: visitor.color, ...position });
+  }
   broadcastState() {
     for (const id of this.clients.keys()) this.send(id, { type: 'control', enabled: this.session.enabled, controller: this.session.controller, epoch: this.session.epoch, reason: this.session.controlReason });
   }

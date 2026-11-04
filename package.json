@@ -1,6 +1,6 @@
 {
   "name": "ghostcursor",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Windows 窗口共享与访客鼠标协作",
   "author": "GhostCursor",
