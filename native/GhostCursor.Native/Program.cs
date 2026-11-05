@@ -64,6 +64,11 @@ internal sealed class Engine(Application app) : IDisposable
                     using var document = JsonDocument.Parse(line);
                     var data = document.RootElement;
                     var id = data.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0;
+                    if (Str(data, "type") == "windows")
+                    {
+                        Reply(new { id, ok = true, windows = ListWindows((uint)Num(data, "excludePid")) });
+                        continue;
+                    }
                     if (Str(data, "type") == "snapshot")
                     {
                         var available = Available(out _, out var reason);
@@ -95,6 +100,27 @@ internal sealed class Engine(Application app) : IDisposable
     private static bool Bool(JsonElement e, string key) => e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.True;
     private static double Num(JsonElement e, string key) => e.TryGetProperty(key, out var v) && v.TryGetDouble(out var d) ? d : 0;
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    private static object[] ListWindows(uint excludePid)
+    {
+        var windows = new List<object>();
+        Win.EnumWindows((hwnd, _) =>
+        {
+            if (windows.Count >= 256) return false;
+            if (hwnd == Win.GetShellWindow() || !Win.IsWindowVisible(hwnd) || Win.Cloaked(hwnd)) return true;
+            Win.GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == Environment.ProcessId || pid == excludePid) return true;
+            // Skip tool windows. Reading foreign titles uses the OS caption cache,
+            // without asking unresponsive applications to render thumbnails.
+            if ((Win.GetWindowLongPtr(hwnd, -20).ToInt64() & 0x80) != 0) return true;
+            var title = new StringBuilder(512);
+            Win.GetWindowText(hwnd, title, title.Capacity);
+            var name = title.ToString().Trim();
+            if (name.Length > 0) windows.Add(new { id = $"window:{hwnd.ToInt64()}:0", name, thumbnail = "" });
+            return true;
+        }, IntPtr.Zero);
+        return windows.ToArray();
+    }
 
     private void Handle(JsonElement data)
     {
@@ -396,6 +422,8 @@ internal static class Win
     [StructLayout(LayoutKind.Sequential)] private struct Input { public uint type; public MouseInput mouse; }
     internal delegate bool EnumProc(IntPtr hwnd, IntPtr param);
     [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumProc callback, IntPtr param);
+    [DllImport("user32.dll")] internal static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] internal static extern bool IsIconic(IntPtr hwnd);

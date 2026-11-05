@@ -1,0 +1,15 @@
+# Example only: replace all placeholders before starting coturn.
+listening-port=3478
+fingerprint
+lt-cred-mech
+realm=turn.example.com
+user=ghostcursor:REPLACE_WITH_A_LONG_RANDOM_PASSWORD
+external-ip=REPLACE_WITH_PUBLIC_IPV4
+min-port=49160
+max-port=49200
+no-cli
+no-loopback-peers
+no-multicast-peers
+# Plain TURN over UDP/TCP; TLS requires certificate and listener configuration.
+no-tls
+no-dtls

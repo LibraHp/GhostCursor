@@ -1,4 +1,6 @@
 import type { VideoSettings, CursorSettings } from './settings';
+import type { GraphicsMode, GraphicsState } from './graphics';
+import type { NetworkSettings } from './network';
 
 export interface WindowSource { id: string; name: string; thumbnail: string }
 export interface Visitor { id: string; name: string; color: string; connectedAt: number }
@@ -7,6 +9,8 @@ export interface HostState {
   controlEnabled: boolean; epoch: number; links: string[]; port: number;
   controlPending: boolean; controlReason: string;
   video: VideoSettings; cursor: CursorSettings;
+  graphics: GraphicsState;
+  network: NetworkSettings;
   sourceName: string; hotkey: string; nativeReady: boolean; targetAvailable: boolean; error: string;
 }
 export type PointerMessage = {
@@ -16,6 +20,7 @@ export type PointerMessage = {
 };
 export type Signal = { type: 'offer' | 'answer' | 'ice'; data: unknown };
 export type HostEvent = { type: 'visitor-joined'; visitor: Visitor } |
+  { type: 'relay-ready'; id: string; mimeTypes: string[] } |
   { type: 'visitor-left'; id: string } | { type: 'signal'; id: string; signal: Signal } |
   { type: 'native-status'; available: boolean; reason: string };
 export interface GhostBridge {
@@ -26,9 +31,14 @@ export interface GhostBridge {
   recordHotkey(recording: boolean): Promise<void>;
   setVideo(value: VideoSettings): Promise<void>;
   setCursor(value: CursorSettings): Promise<void>;
-  disconnect(id: string): Promise<void>;
+  setGraphics(mode: GraphicsMode): Promise<void>;
+  setNetwork(value: NetworkSettings): Promise<void>;
+  restart(): Promise<void>; copyGraphicsDiagnostics(): Promise<void>;
+  disconnect(id: string, reason?: string): Promise<void>;
   diagnostics(): Promise<{ successfulInputs: number; visibleMarkers: number; available: boolean; reason: string }>;
   signal(id: string, signal: Signal): void; pointer(id: string, message: unknown): void;
+  relayStart(id: string, sessionId: string, streamId: number, mime: string): Promise<boolean>;
+  relayChunk(id: string, sessionId: string, streamId: number, sequence: number, data: ArrayBuffer): Promise<boolean>;
   frameSize(width: number, height: number): void;
   copy(text: string): Promise<void>;
   onState(callback: (state: HostState) => void): () => void;
