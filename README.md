@@ -1,5 +1,27 @@
 # GhostCursor
 
+> 当前开发分支：`feat/web-service`。新增可独立部署的 Web 服务，浏览器直接选择窗口共享；默认视频、信令和鼠标位置共用同一个网站端口，主持人电脑不需要 FRP 映射。
+
+## Web 服务版
+
+```bash
+npm ci --ignore-scripts
+npm run build:web
+npm run start:web
+```
+
+打开 `http://localhost:3210/host`，使用服务终端生成的主持人密钥进入工作台，点击「选择窗口并共享」。远程部署请设置 `GHOSTCURSOR_HOST_KEY`、`PUBLIC_URL` 并提供 HTTPS，或使用仓库的 `Dockerfile` / `compose.yaml`。运行时只需 Node.js 与 `dist/service`、`dist/web`，无需 Electron、Chromium 或 .NET。
+
+纯浏览器支持共享、访客管理、画质和网页预览中的鼠标 / 触摸位置。实际应用窗口上的标记与系统控制，通过可选本机辅助程序连接；需要浏览器提供精确原生窗口编号、本机确认绑定和主持人明确授权，无法验证窗口时保持关闭。
+
+详见 **[Web 服务与 Docker 部署说明](docs/web-service.md)**，包括单端口反代、可选辅助程序及浏览器能力边界。辅助程序构建命令为 `npm run build:companion`，运行 `npm run start:companion`；没有 Electron，但 Windows helper 仍使用自带 .NET 运行时。以下为原桌面版说明，现有 v0.3.0 Release 不包含本分支的 Web 服务改造。
+
+![Web 主持人通过浏览器共享实际应用窗口，并显示访客位置](docs/images/web-host-sharing.png)
+
+![Web 访客通过同一个网站接收实时视频](docs/images/web-viewer-live.png)
+
+本分支已在 Windows / Edge 中实际运行独立 Node 服务，完成浏览器选择专用演示窗口、WebSocket 视频观看、网页鼠标位置与停止共享流程；[采集记录](docs/images/web-capture-info.json)。构建后的服务与静态网页合计约 1.1 MB（不含 Node.js / Docker 基础镜像）；Windows 辅助程序已编译，完整原生控制链路与 Mac 改动尚需实机验收，Docker 镜像尚未实构建。自动测试套件未执行。
+
 将一个应用窗口共享到网页，让远端访客观看画面，并在你本机的对应共享窗口上显示访客鼠标的位置标记。你可以用全局快捷键开启或关闭指定访客的远程控制；授权后，访客操作你现有的系统鼠标。
 
 Windows / macOS 桌面端与访客网页。界面使用 Ant Design，采用 Windows 11 风格的浅色背景、圆角面板和蓝色强调。

@@ -5,10 +5,14 @@ export class TokenBucket {
   private updated = performance.now();
   constructor(private perSecond: number, private capacity: number) { this.tokens = capacity; }
   take(now = performance.now()): boolean {
+    return this.consume(1, now);
+  }
+  consume(amount: number, now = performance.now()): boolean {
+    if (!Number.isFinite(amount) || amount <= 0) return false;
     this.tokens = Math.min(this.capacity, this.tokens + Math.max(0, now - this.updated) * this.perSecond / 1000);
     this.updated = now;
-    if (this.tokens < 1) return false;
-    this.tokens--; return true;
+    if (this.tokens < amount) return false;
+    this.tokens -= amount; return true;
   }
 }
 

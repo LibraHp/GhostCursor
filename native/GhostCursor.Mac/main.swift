@@ -124,6 +124,7 @@ private final class Engine {
     var cursorHidden = false, successfulInputs = 0
     var appearance = Appearance()
     var timer: Timer?
+    var keyMonitor: Any?
     init(fd: Int32) { self.fd = fd }
     var permissions: [String: Bool] { ["screen": CGPreflightScreenCaptureAccess(), "accessibility": AXIsProcessTrusted()] }
     func start() {
@@ -172,6 +173,16 @@ private final class Engine {
         let id = number(d, "id")
         do {
             switch string(d, "type") {
+            case "companion-hotkey":
+                if keyMonitor == nil {
+                    keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                        if event.keyCode == 100 && event.modifierFlags.contains([.control, .option]) {
+                            guard let engine = self else { return }
+                            engine.revoke(); engine.reply(["type": "local-revoke", "epoch": engine.epoch]); engine.lastStatus = ""
+                        }
+                    }
+                    if keyMonitor == nil { throw failure("无法注册本机收回快捷键，请检查辅助功能权限") }
+                }
             case "permissions":
                 if d["prompt"] as? Bool == true {
                     if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
@@ -371,7 +382,7 @@ private final class Engine {
             reply(["type": "status", "available": selected != nil, "enabled": enabled, "epoch": epoch, "reason": reason, "closed": reason == "共享窗口已关闭", "permissions": p])
         }
     }
-    func shutdown() { timer?.invalidate(); clear(); Darwin.close(fd); NSApplication.shared.terminate(nil) }
+    func shutdown() { timer?.invalidate(); if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }; clear(); Darwin.close(fd); NSApplication.shared.terminate(nil) }
 }
 
 let app = NSApplication.shared

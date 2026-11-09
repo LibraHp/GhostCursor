@@ -23,14 +23,14 @@ export class HostMedia {
   constructor(private api: GhostBridge, private onError: (text: string) => void) {
     this.unsubscribe = api.onEvent(event => this.event(event));
   }
-  async capture() {
+  async capture(selectedStream?: MediaStream) {
     const generation = ++this.generation;
     const state = await this.api.state();
     if (generation !== this.generation || !state.sharing) throw new Error('共享已停止');
     this.settings = state.video;
     this.network = state.network;
     this.sessionId = state.sessionId;
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: initialVideoConstraints(state.video), audio: false });
+    const stream = selectedStream || await navigator.mediaDevices.getDisplayMedia({ video: initialVideoConstraints(state.video), audio: false });
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); throw new Error('共享已停止'); }
     this.stream = stream;
     const track = stream.getVideoTracks()[0];

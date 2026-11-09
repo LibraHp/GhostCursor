@@ -4,6 +4,7 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { Host } from './Host';
 import { Viewer } from './Viewer';
+import { BrowserHost } from './BrowserHost';
 import './style.css';
 
 function Root() {
@@ -21,7 +22,7 @@ function Root() {
     fontFamily: '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif',
     fontSize: 13, boxShadow: '0 6px 24px rgba(30, 45, 75, .07)',
   }, components: { Button: { primaryShadow: '0 3px 9px rgba(37,99,235,.18)' }, Modal: { borderRadiusLG: 14 } } }}>
-    <AntApp>{window.ghost ? <Host /> : <Viewer />}</AntApp>
+    <AntApp>{window.ghost ? <Host /> : location.pathname === '/host' || (!location.hash && !!document.querySelector('meta[name="ghostcursor-web-service"]')) ? <BrowserHost /> : <Viewer />}</AntApp>
   </ConfigProvider>
   );
 }

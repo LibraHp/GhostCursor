@@ -43,6 +43,7 @@ export class NativeBridge extends EventEmitter {
                 const p = this.pending.get(data.id)!; this.pending.delete(data.id); clearTimeout(p.timer);
                 data.ok ? p.resolve(data) : p.reject(new Error(data.error || '原生操作失败'));
               } else if (data.type === 'status') this.emit('status', data);
+              else if (data.type === 'local-revoke') this.emit('local-revoke', data);
             } catch { this.emit('failure', new Error('原生组件返回了无效消息')); }
           });
           resolve();

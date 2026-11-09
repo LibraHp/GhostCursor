@@ -44,6 +44,8 @@ internal sealed class Engine(Application app) : IDisposable
     private long lastControllerInput;
     private string lastStatus = "";
     private string inputFailure = "";
+    private HwndSource? hotkeyWindow;
+    private const int RevokeHotkey = 0x4743;
 
     public async Task Connect(string name)
     {
@@ -126,6 +128,20 @@ internal sealed class Engine(Application app) : IDisposable
     {
         switch (Str(data, "type"))
         {
+            case "companion-hotkey":
+                if (hotkeyWindow is not null) break;
+                hotkeyWindow = new HwndSource(new HwndSourceParameters("GhostCursor Revoke") { ParentWindow = new IntPtr(-3), WindowStyle = 0 });
+                hotkeyWindow.AddHook((IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) => {
+                    if (msg == 0x0312 && wParam.ToInt32() == RevokeHotkey) {
+                        Revoke(); Reply(new { type = "local-revoke", epoch }); lastStatus = ""; handled = true;
+                    }
+                    return IntPtr.Zero;
+                });
+                if (!Win.RegisterHotKey(hotkeyWindow.Handle, RevokeHotkey, 0x4000 | 0x0001 | 0x0002, 0x77)) {
+                    hotkeyWindow.Dispose(); hotkeyWindow = null;
+                    throw new Exception("本机 Ctrl+Alt+F8 收回快捷键已被占用，请先退出其他 GhostCursor 程序");
+                }
+                break;
             case "target":
                 Clear();
                 if (!long.TryParse(Str(data, "hwnd"), out var handle)) throw new Exception("窗口句柄无效");
@@ -323,7 +339,7 @@ internal sealed class Engine(Application app) : IDisposable
         foreach (var marker in markers.Values) marker.Window.Close();
         markers.Clear(); lastStatus = ""; inputFailure = "";
     }
-    public void Dispose() { timer.Stop(); Clear(); pipe?.Dispose(); pipe = null; }
+    public void Dispose() { timer.Stop(); Clear(); if (hotkeyWindow is not null) { Win.UnregisterHotKey(hotkeyWindow.Handle, RevokeHotkey); hotkeyWindow.Dispose(); hotkeyWindow = null; } pipe?.Dispose(); pipe = null; }
 }
 
 internal sealed record CursorAppearance(string Shape = "arrow", int Size = 32, string? Color = null);
@@ -414,6 +430,8 @@ internal sealed class Marker
 
 internal static class Win
 {
+    [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+    [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     internal static int SuccessfulInputs;
     [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; public readonly int Width => Right - Left; public readonly int Height => Bottom - Top; public readonly bool Contains(int x, int y) => x >= Left && x < Right && y >= Top && y < Bottom; }
     [StructLayout(LayoutKind.Sequential)] internal struct Point(int x, int y) { public int X = x, Y = y; }

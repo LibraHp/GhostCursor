@@ -1,0 +1,9 @@
+services:
+  ghostcursor:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3210:3210"
+    environment:
+      GHOSTCURSOR_HOST_KEY: ${GHOSTCURSOR_HOST_KEY:?请设置至少24字符的主持人密钥}
+      PUBLIC_URL: ${PUBLIC_URL:?请设置外部HTTPS网站地址}

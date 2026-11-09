@@ -1,0 +1,10 @@
+.git
+node_modules
+dist
+release
+artifacts
+native
+tests
+.env*
+*.log
+docs/images

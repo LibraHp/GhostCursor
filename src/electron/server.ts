@@ -1,4 +1,5 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -12,6 +13,12 @@ import { MAX_RELAY_CHUNK, packRelayChunk, validRelayMime } from '../shared/relay
 import { TokenBucket } from '../shared/rate-limit';
 
 const colors = ['#2563eb', '#8b5cf6', '#e65580', '#059669', '#d97706', '#0891b2', '#6366f1', '#dc2626'];
+export interface ServiceOptions {
+  host?: string;
+  browserHost?: boolean;
+  request?: (req: IncomingMessage, res: ServerResponse) => boolean;
+  upgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean;
+}
 export class SharingServer extends EventEmitter {
   private http?: Server; private wss?: WebSocketServer;
   private clients = new Map<string, WebSocket>();
@@ -19,19 +26,21 @@ export class SharingServer extends EventEmitter {
   private network: NetworkSettings = DEFAULT_NETWORK;
   private relay = new Map<string, { streamId: number; sequence: number; ack: number; bytes: number; pending: Map<number, { bytes: number; sentAt: number }> }>();
   constructor(private session: Session, private webRoot: string) { super(); }
-  async start(port: number) {
+  async start(port: number, options: ServiceOptions = {}) {
     const server = createServer(async (req, res) => {
       const headers = {
         'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
         'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
       };
       try {
+        if (options.request?.(req, res)) return;
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, headers).end(); return; }
         const path = new URL(req.url || '/', 'http://localhost').pathname;
-        if (path !== '/' && !path.startsWith('/assets/')) { res.writeHead(404, headers).end(); return; }
-        const file = resolve(this.webRoot, path === '/' ? 'index.html' : '.' + decodeURIComponent(path));
+        if (path !== '/' && !(options.browserHost && path === '/host') && !path.startsWith('/assets/')) { res.writeHead(404, headers).end(); return; }
+        const file = resolve(this.webRoot, path === '/' || path === '/host' ? 'index.html' : '.' + decodeURIComponent(path));
         if (!file.startsWith(resolve(this.webRoot) + sep)) { res.writeHead(403, headers).end(); return; }
-        const content = await readFile(file);
+        const rawContent = await readFile(file);
+        const content = options.browserHost && extname(file) === '.html' ? Buffer.from(rawContent.toString('utf8').replace('<head>', '<head><meta name="ghostcursor-web-service" content="1">')) : rawContent;
         const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
         res.writeHead(200, { ...headers, 'Content-Type': mime[extname(file)] || 'application/octet-stream' });
         res.end(req.method === 'HEAD' ? undefined : content);
@@ -40,6 +49,7 @@ export class SharingServer extends EventEmitter {
     const wss = new WebSocketServer({ noServer: true, maxPayload: 128_000, perMessageDeflate: false });
     this.http = server; this.wss = wss;
     server.on('upgrade', (req, socket, head) => {
+      if (options.upgrade?.(req, socket, head)) return;
       if (req.url !== '/ws' || wss.clients.size >= 24) { socket.destroy(); return; }
       // Permit the configured public origin when FRP rewrites the upstream Host.
       const origins = [`http://${req.headers.host}`, `https://${req.headers.host}`, ...(this.network.publicUrl ? [this.network.publicUrl] : [])];
@@ -101,11 +111,11 @@ export class SharingServer extends EventEmitter {
       ws.on('close', () => {
         clearTimeout(timeout); clearInterval(heartbeat);
         this.relay.delete(id);
-        if (id && this.clients.delete(id)) { this.session.remove(id); this.emit('leave', id); this.broadcastState(); }
+        if (id && this.clients.get(id) === ws && this.clients.delete(id)) { this.session.remove(id); this.emit('leave', id); this.broadcastState(); }
       });
     });
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject); server.listen(port, '0.0.0.0', () => { server.removeListener('error', reject); resolve(); });
+      server.once('error', reject); server.listen(port, options.host || '0.0.0.0', () => { server.removeListener('error', reject); resolve(); });
     });
     server.on('error', error => this.emit('failure', error));
   }
@@ -142,6 +152,11 @@ export class SharingServer extends EventEmitter {
   }
   broadcastState() {
     for (const id of this.clients.keys()) this.send(id, { type: 'control', enabled: this.session.enabled, controller: this.session.controller, epoch: this.session.epoch, reason: this.session.controlReason });
+  }
+  get address() { return this.http?.address(); }
+  endSession() {
+    for (const ws of this.wss?.clients || []) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ended' })); ws.close(4000, '主持人已结束共享'); }
+    this.clients.clear(); this.relay.clear();
   }
   async stop() {
     for (const ws of this.wss?.clients || []) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ended' })); ws.terminate(); }

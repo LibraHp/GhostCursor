@@ -8,6 +8,8 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 
 ## 当前状态
 
+当前 `feat/web-service` 分支增加可独立部署的 Node.js 服务、浏览器主持人 `/host` 与可选出站连接的本机辅助程序。运行 `npm run build:web` / `npm run start:web`，服务运行时不需要 Electron 或 .NET；Docker / 反代配置见 `docs/web-service.md`。桌面端仍保留，现有 v0.3.0 Release 不含本分支功能。
+
 已实现 Electron 桌面端、React + Ant Design 网页、HTTP/WebSocket 服务、可选的 WebSocket 编码视频或 WebRTC 视频/数据通道，以及 Windows C# WPF/Win32、macOS Swift/AppKit 原生辅助进程。v0.3.0 新增 macOS 原生组件，尚需 Mac 实机验收。界面遵循 Windows 11 风格：浅色背景、圆角、细边框、柔和阴影和克制的蓝色强调。不要把尚未验证的兼容场景描述为已支持。
 
 目录：`src/electron`、`src/web`、`src/shared`、`native/GhostCursor.Native`、`tests`、`scripts` 和 `assets`。
@@ -47,6 +49,15 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 - 固定 UDP 模式 `webrtc-mapped` 在共享前调用 Electron `setWebRTCUDPPortRange` 将 min/max 设为同一媒体端口，使用 max-bundle/rtcp-mux；额外发布映射公网 IPv4/UDP 端口的 srflx 候选，保留 LAN 候选、ICE 凭据及媒体标识，不改写本地 SDP。仅为匹配本机端口的 IPv4/mDNS UDP host 候选生成映射；无匹配候选时明确失败。该模式一次最多一位访客，不获取 STUN、不发送 TURN 设置；其他模式共享前恢复无限制端口范围。需要真实 UDP 转发，不能把两个 TCP 映射当作已支持，尚未做实网验证。
 
 ## 实现边界
+
+### Web 服务分支
+
+- 浏览器在点击事件内先调用 `getDisplayMedia`，再请求服务开始会话；仅接受应用窗口，禁止选择屏幕后静默当作应用窗口使用。录屏来自主持人本机浏览器，不是服务器桌面。
+- 默认 WebSocket 同一个 HTTPS 网站入口转发视频、信令、位置和辅助程序连接，主持人设备无须入站端口或 FRP 映射。浏览器不支持固定媒体 UDP 端口，Web UI 不提供固定 UDP 模式。
+- 主持人密钥、访客凭据与一次性辅助程序配对码分开；密钥不进 URL / 浏览器存储。校验 WebSocket Origin，主持人断开立即结束会话并清理控制；配对码仅 2 分钟有效且单次使用。
+- 可选辅助程序主动连接网站，不监听浏览器可直接调用的本机网络接口。只接受明确允许的原生方法；原生目标必须匹配浏览器精确窗口编号、来自本机枚举并经本机终端确认，不按标题猜测。浏览器隐藏编号时只提供网页位置标记和观看。
+- 浏览器位置显示与本机系统控制分离。服务端会话、原生组件分别校验访客、代次、目标和时效；辅助程序撤销 / 断线 / 退出应释放按钮恢复指针。全局收回由本机辅助程序提供，纯网页快捷键不能声称全局有效。
+- 服务构建脚本不下载 Electron、不发布原生程序；生产目录只包含 bundled Node 服务和静态网页。Windows 辅助程序目前仍使用 .NET 自带运行时，不夸大其体积缩减。自动测试套件仍按用户此前要求不执行，构建与实际浏览器链路检查据实说明。
 
 ### 位置显示与远程控制
 
