@@ -17,4 +17,5 @@ for y in range(size):
 image.paste(gradient, (0,0), mask)
 out = Path(__file__).resolve().parent.parent / 'assets'
 image.resize((256,256), Image.Resampling.LANCZOS).save(out/'icon.png')
+image.save(out/'icon-mac.png')
 image.save(out/'icon.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])

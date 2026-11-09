@@ -66,7 +66,7 @@
       "signExecutable": false
     },
     "mac": {
-      "icon": "assets/icon.png",
+      "icon": "assets/icon-mac.png",
       "target": ["dmg", "zip"],
       "artifactName": "GhostCursor-${version}-macos-${arch}.${ext}",
       "category": "public.app-category.productivity",
