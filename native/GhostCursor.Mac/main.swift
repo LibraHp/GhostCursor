@@ -42,11 +42,12 @@ private func windows() -> [WindowInfo] {
 private final class MarkerView: NSView {
     override var isFlipped: Bool { true }
     var name = "", hex = "#2563eb", touch = false
-    var appearance = Appearance()
+    var cursorStyle = Appearance()
     var allowed = CGRect.zero
     var occlusions: [CGRect] = []
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let appearance = cursorStyle
         context.saveGState()
         defer { context.restoreGState() }
         context.clip(to: allowed)
@@ -108,7 +109,7 @@ private final class Marker {
         panel.setFrameOrigin(NSPoint(x: origin.x, y: primaryTop - origin.y - panel.frame.height))
         view.allowed = target.offsetBy(dx: -origin.x, dy: -origin.y)
         view.occlusions = above.map { $0.rect.offsetBy(dx: -origin.x, dy: -origin.y) }
-        view.appearance = appearance; view.needsDisplay = true
+        view.cursorStyle = appearance; view.needsDisplay = true
         panel.orderFrontRegardless()
     }
 }
