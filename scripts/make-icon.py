@@ -1,4 +1,4 @@
-"""Generate Windows icon sizes using the same geometry as assets/icon.svg."""
+"""Generate Windows icons and a 1024px macOS icon from the existing geometry."""
 from pathlib import Path
 from PIL import Image, ImageDraw
 

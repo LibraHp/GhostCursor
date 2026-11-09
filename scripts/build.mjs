@@ -7,6 +7,9 @@ const run = (cmd, args) => new Promise((resolve, reject) => {
   child.once('exit', code => code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`)));
 });
 await mkdir('dist/electron', { recursive: true });
+// Electron 45 exposes an explicit installer; a clean npm install alone may
+// leave out the runtime. This is a no-op when the matching runtime is present.
+await run(process.execPath, ['node_modules/electron/install.js']);
 await run(process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit']);
 await build({ entryPoints: ['src/electron/main.ts'], outfile: 'dist/electron/main.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron', 'ws'], target: 'node22' });
 await build({ entryPoints: ['src/electron/preload.ts'], outfile: 'dist/electron/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node22' });
