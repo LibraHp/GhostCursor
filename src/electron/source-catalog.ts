@@ -16,7 +16,7 @@ export class SourceCatalog<T extends { id: string }> {
     try {
       const list = await Promise.race([
         this.pending,
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Windows 窗口捕获响应超时，请恢复目标窗口后重试；若持续失败，请重启 GhostCursor 并检查显卡驱动')), this.timeoutMs); }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('窗口捕获响应超时，请恢复目标窗口后重试；若持续失败，请重启 GhostCursor 并检查录屏权限或显卡驱动')), this.timeoutMs); }),
       ]);
       // Chromium's final ID segment identifies its capture backend and can be
       // 0 or 1. Match the native HWND, then return Chromium's original object.

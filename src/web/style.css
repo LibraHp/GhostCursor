@@ -13,6 +13,7 @@ h1,h2,h3,p { margin: 0; }
 .desktop-shell { min-height: 100vh; background: radial-gradient(ellipse at 82% 0, #eaf0fc80, transparent 55%), #f4f6fa; }
 .titlebar { height: 42px; padding: 0 18px; display: flex; align-items: center; position: fixed; inset: 0 0 auto; z-index: 10; background: #f3f5fa; -webkit-app-region: drag; user-select: none; }
 .brand-mark { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; letter-spacing: -.2px; }
+.platform-mac .titlebar { padding-left: 86px; }
 .cursor-logo { display: inline-block; width: 21px; height: 24px; background: linear-gradient(145deg, #60a5fa, #2563eb 60%, #5f66df); clip-path: polygon(8% 0, 98% 58%, 58% 65%, 45% 100%); filter: drop-shadow(0 3px 4px #2563eb30); }
 .sidebar { position: fixed; top: 42px; bottom: 0; left: 0; width: 190px; padding: 28px 12px 20px; background: #edf1f780; border-right: 1px solid #e3e8f080; display: flex; flex-direction: column; }
 .workspace-label { color: #96a0b1; font-size: 11px; margin: 0 14px 16px; letter-spacing: .5px; }

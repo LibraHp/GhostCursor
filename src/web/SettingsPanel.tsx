@@ -40,7 +40,7 @@ export function SettingsPanel({ state, port, setPort, videoBusy, cursorBusy, cha
     </div>
     <div className="setting-row"><div><h3>Web 服务端口</h3><p>同一局域网中的设备可通过邀请链接加入。</p></div><InputNumber aria-label="Web 服务端口" min={1024} max={65535} value={port} disabled={state.sharing} onChange={value => setPort(value || 3210)} /></div>
     <NetworkSettingsPanel value={state.network} sharing={state.sharing} autoStunResult={state.autoStunResult} />
-    <div className="setting-row"><div><h3>Windows 原生组件</h3><p>用于绘制访客标记和处理授权后的鼠标输入。</p></div><Tag color={state.nativeReady ? 'success' : 'processing'}>{state.nativeReady ? '已就绪' : '连接中 / 不可用'}</Tag></div>
+    <div className="setting-row"><div><h3>{state.platform === 'darwin' ? 'macOS' : 'Windows'} 原生组件</h3><p>用于绘制访客标记和处理授权后的鼠标输入。</p></div><Tag color={state.nativeReady ? 'success' : 'processing'}>{state.nativeReady ? '已就绪' : '连接中 / 不可用'}</Tag></div>
     <Alert type="info" showIcon title="连接方式" description="局域网可使用邀请链接；外网可选 WebSocket 共用网页端口，或固定 UDP 模式分别映射 TCP 网页与 UDP 媒体端口。普通 WebRTC 直连失败时可配置 TURN。Windows 防火墙需允许相应网络连接。" />
   </div>;
 }

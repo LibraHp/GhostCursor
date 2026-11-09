@@ -1,0 +1,7 @@
+{
+  "version": "0.3.0",
+  "platform": "win32",
+  "capturedAt": "2026-11-09T10:31:22.281Z",
+  "transport": "websocket",
+  "description": "实际运行的 Electron、Windows 原生组件与 Edge；共享独立演示窗口，无模拟 bridge 或会话状态。"
+}

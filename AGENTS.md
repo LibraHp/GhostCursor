@@ -8,7 +8,7 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 
 ## 当前状态
 
-已实现 Electron 桌面端、React + Ant Design 网页、HTTP/WebSocket 服务、可选的 WebSocket 编码视频或 WebRTC 视频/数据通道，以及 C# WPF/Win32 原生辅助进程。最新 WebSocket 视频源码尚未编译和测试。界面遵循 Windows 11 风格：浅色背景、圆角、细边框、柔和阴影和克制的蓝色强调。不要把尚未验证的兼容场景描述为已支持。
+已实现 Electron 桌面端、React + Ant Design 网页、HTTP/WebSocket 服务、可选的 WebSocket 编码视频或 WebRTC 视频/数据通道，以及 Windows C# WPF/Win32、macOS Swift/AppKit 原生辅助进程。v0.3.0 新增 macOS 原生组件，尚需 Mac 实机验收。界面遵循 Windows 11 风格：浅色背景、圆角、细边框、柔和阴影和克制的蓝色强调。不要把尚未验证的兼容场景描述为已支持。
 
 目录：`src/electron`、`src/web`、`src/shared`、`native/GhostCursor.Native`、`tests`、`scripts` 和 `assets`。
 
@@ -35,16 +35,16 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 
 ## 首版范围与技术方向
 
-- 优先支持 Windows 10/11 桌面端，先完成局域网使用闭环。
+- 主持人平台为 Windows 10/11 x64 与 macOS 13+ Intel / Apple Silicon。macOS 构建使用对应架构 Swift 原生组件，不可打包 Windows WPF exe 冒充 Mac 支持；录屏与辅助功能权限需显式提示，真实交互仍需 Mac 实机验收。
 - 首版控制输入包含鼠标移动、按键和滚轮；键盘、音频、剪贴板、文件传输和无人值守访问不属于首版必需功能。
 - Electron + TypeScript 负责桌面宿主、窗口枚举/捕获、Web 服务和全局快捷键，React + Vite + Ant Design 负责桌面界面与访客网页。
 - C# + .NET 10 + WPF/Win32 原生辅助进程处理透明悬浮层、窗口坐标、目标验证与输入注入，通过本机命名管道连接 Electron。
 - 视频可选 WebSocket 或 Chromium 内置 WebRTC。WebSocket 模式使用 MediaRecorder 编码、服务端二进制转发和访客 MediaSource 解码，视频与经过相同授权校验的输入共用 `/ws`，适合 FRP 单端口映射；禁止逐帧截图轮询。WebRTC 模式使用 WebSocket 信令、有序可靠的 DataChannel 传输鼠标消息。分片必须有会话、流代次和顺序校验；控制共享和解码积压，重建流时从新的容器初始化开始，不丢弃任意编码增量。
 - 首版仅在共享窗口前台时显示位置并接受控制；前台丢失会收回控制。只有主持人明确开启控制时才尝试切到共享窗口，访客消息不得主动激活其他窗口。原生和主进程分别校验授权代次，丢弃撤销前的过期输入；原生拒绝或停止输入时立即同步撤销及具体原因。改动依赖时检查维护状态、许可证和可分发性。
 - 不引入账号平台或数据库。公网支持 WebSocket 单端口转发、可选 WebRTC STUN/TURN、公网邀请地址和 FRP WebSocket Origin；实际 HTTPS、TURN 服务器和防火墙由部署方配置。不得把 HTTP 端口映射描述为已经转发 WebRTC 视频；WebSocket 模式无需 TURN。部署见 `docs/frp.md`。
-- 网络设置仅在停止共享时修改；新设置默认 WebSocket，旧设置保留 WebRTC。WebRTC 两端在建立 offer/answer 前应用相同 ICE 配置，中继凭据仅在会话认证后发送，WebSocket 模式不发送 TURN 凭据。连接超时需按所选方式提示。用户本次明确要求不编译、不测试，该要求优先于仓库的通常验收流程。
+- 网络设置仅在停止共享时修改；新设置默认 WebSocket，旧设置保留 WebRTC。WebRTC 两端在建立 offer/answer 前应用相同 ICE 配置，中继凭据仅在会话认证后发送，WebSocket 模式不发送 TURN 凭据。连接超时需按所选方式提示。用户最新要求编译 Windows / macOS 并发布 Release，已覆盖之前的“不编译”限制；仍不执行此前要求跳过的自动测试套件。允许采集实际运行截图，禁止用模拟 bridge/会话状态的设计稿代替。
 - WebRTC 可自动从 always-online-stun 的 `valid_hosts_tcp.txt` 选取最多 3 个 STUN 地址。TCP 名单必须先确认本机 UDP Binding 响应，不能声称名单可用就保证 WebRTC 直连，也不能把 STUN 当作 TURN。下载和检测需超时、限量、合并请求，缓存 1 小时，更新失败回退；仅保存或开始共享时刷新，不在共享中改变 ICE 配置。旧自定义地址保留手动模式；WebSocket/强制 TURN 不获取名单。
-- 固定 UDP 模式 `webrtc-mapped` 在共享前调用 Electron `setWebRTCUDPPortRange` 将 min/max 设为同一媒体端口，使用 max-bundle/rtcp-mux；额外发布映射公网 IPv4/UDP 端口的 srflx 候选，保留 LAN 候选、ICE 凭据及媒体标识，不改写本地 SDP。仅为匹配本机端口的 IPv4/mDNS UDP host 候选生成映射；无匹配候选时明确失败。该模式一次最多一位访客，不获取 STUN、不发送 TURN 设置；其他模式共享前恢复无限制端口范围。需要真实 UDP 转发，不能把两个 TCP 映射当作已支持，源码尚未编译和实网验证。
+- 固定 UDP 模式 `webrtc-mapped` 在共享前调用 Electron `setWebRTCUDPPortRange` 将 min/max 设为同一媒体端口，使用 max-bundle/rtcp-mux；额外发布映射公网 IPv4/UDP 端口的 srflx 候选，保留 LAN 候选、ICE 凭据及媒体标识，不改写本地 SDP。仅为匹配本机端口的 IPv4/mDNS UDP host 候选生成映射；无匹配候选时明确失败。该模式一次最多一位访客，不获取 STUN、不发送 TURN 设置；其他模式共享前恢复无限制端口范围。需要真实 UDP 转发，不能把两个 TCP 映射当作已支持，尚未做实网验证。
 
 ## 实现边界
 
@@ -79,6 +79,8 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 ## 后续维护
 
 - 原生辅助程序自带 .NET 运行时；安装包或便携版不应要求使用者安装开发环境。
+- macOS helper 使用私有 0700 临时目录的 Unix socket，保留访客/授权代次/前台目标/遮挡/消息时效检查；切换、撤销、断线和退出时释放按钮并恢复鼠标。macOS 自动图形模式不得套用 Windows build 判断。
+- 发布流程见 `.github/workflows/release.yml`：Windows x64、Mac x64、Mac arm64 分别原机构建；所有安装包成功后再发布，包含 SHA256。未经真实设备验收不得把 Swift 编译或 DMG 生成等同于功能验证。当前 Mac 为 ad-hoc 签名且无 Apple 公证，准确说明此限制，不索要或提交 Apple 凭据。
 - 界面依赖在前端构建时打包，仅 `ws` 属于主进程运行时 npm 依赖；避免把整个 UI 依赖树放入分发包。
 - 改动捕获、坐标、授权或输入时，在单元/集成测试之外运行 Windows 实机链路验收。验收会切换测试窗口到前台，并对专用测试窗口注入输入；不得改成对用户现有窗口进行测试。
 - 已通过打包后程序在 Windows 11、150% 缩放下的链路验收。跨设备局域网、多显示器及其他 DPI 组合仍需实际设备验证，不要声称已经覆盖。

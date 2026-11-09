@@ -3,16 +3,26 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
+import { mkdtemp, chmod, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export class NativeBridge extends EventEmitter {
   private socket?: Socket; private child?: ChildProcess; private serial = 0;
+  private socketDirectory?: string;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   async launch(executable: string) {
     const name = `ghostcursor-${randomUUID()}`;
+    let address = `\\\\.\\pipe\\${name}`;
+    if (process.platform === 'darwin') {
+      this.socketDirectory = await mkdtemp(join(tmpdir(), 'gc-'));
+      await chmod(this.socketDirectory, 0o700);
+      address = join(this.socketDirectory, 'ipc');
+    }
     const server = createServer();
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(`\\\\.\\pipe\\${name}`, () => resolve());
+      server.listen(address, () => resolve());
     });
     try {
       await new Promise<void>((resolve, reject) => {
@@ -37,11 +47,16 @@ export class NativeBridge extends EventEmitter {
           });
           resolve();
         });
-        this.child = spawn(executable, [name], { windowsHide: true, stdio: 'ignore' });
+        this.child = spawn(executable, [process.platform === 'darwin' ? address : name], { windowsHide: true, stdio: process.env.GHOSTCURSOR_E2E ? ['ignore', 'ignore', 'pipe'] : 'ignore' });
+        this.child.stderr?.on('data', chunk => process.stderr.write(chunk));
         this.child.once('error', fail);
         this.child.once('exit', () => fail(new Error('原生组件意外退出')));
       });
-    } catch (error) { server.close(); this.child?.kill(); throw error; }
+    } catch (error) { server.close(); this.child?.kill(); await this.cleanup(); throw error; }
+  }
+  private async cleanup() {
+    const directory = this.socketDirectory; this.socketDirectory = undefined;
+    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
   }
   send(type: string, payload: object = {}) {
     if (!this.socket || this.socket.destroyed) throw new Error('原生组件尚未就绪');
@@ -62,6 +77,7 @@ export class NativeBridge extends EventEmitter {
   close() {
     try { this.send('shutdown'); } catch {}
     this.socket?.end();
+    void this.cleanup();
     // Let the helper restore cursor visibility and release pressed buttons before exit.
     const child = this.child;
     if (child && child.exitCode === null) {

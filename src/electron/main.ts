@@ -22,7 +22,7 @@ const graphicsPath = join(app.getPath('userData'), 'graphics.json');
 let graphicsMode: GraphicsMode = 'auto';
 try { const saved = JSON.parse(readFileSync(graphicsPath, 'utf8')); if (validGraphicsMode(saved.mode)) graphicsMode = saved.mode; } catch {}
 const forcedGraphics = process.argv.includes('--graphics-compatibility') ? 'compatibility' : process.argv.includes('--graphics-hardware') ? 'hardware' : undefined;
-const compatibility = useCompatibility(forcedGraphics || graphicsMode, windowsBuild);
+const compatibility = useCompatibility(forcedGraphics || graphicsMode, windowsBuild, process.platform);
 // Must be applied before app.ready / any renderer or GPU process starts.
 if (compatibility) app.disableHardwareAcceleration();
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -35,6 +35,7 @@ let sourceId = '', sourceName = '', port = 3210, hotkey = 'Ctrl+Alt+F8';
 let nativeReady = false, targetAvailable = false, error = '', busy = false;
 let quitting = false;
 let nativeReason = '';
+let permissions: HostState['permissions'];
 let sessionHosts = ['127.0.0.1'];
 let network: NetworkSettings = { ...DEFAULT_NETWORK };
 const autoStun = new AutoStun(join(app.getPath('userData'), 'stun-cache.json'));
@@ -58,10 +59,10 @@ const rates = new Map<string, { moves: TokenBucket; actions: TokenBucket }>();
 const controls = new ControlCoordinator(sharing, { request: (type, payload) => native.request(type, payload), send: sendNative }, () => { server.broadcastState(); publish(); });
 
 function state(): HostState {
-  return { sharing: sharing.active, sessionId: sharing.id, visitors: [...sharing.visitors.values()], controller: sharing.controller,
+  return { platform: process.platform, permissions, sharing: sharing.active, sessionId: sharing.id, visitors: [...sharing.visitors.values()], controller: sharing.controller,
     controlEnabled: sharing.enabled, epoch: sharing.epoch, links: sharing.active ? [...(network.publicUrl ? [`${network.publicUrl}/#${sharing.token}`] : []), ...sessionHosts.map(host => `http://${host}:${port}/#${sharing.token}`)] : [],
     controlPending: controls.pending, controlReason: sharing.controlReason, video, cursor,
-    graphics: { mode: graphicsMode, compatibility, restartRequired: useCompatibility(graphicsMode, windowsBuild) !== compatibility }, network, autoStunResult,
+    graphics: { mode: graphicsMode, compatibility, restartRequired: useCompatibility(graphicsMode, windowsBuild, process.platform) !== compatibility }, network, autoStunResult,
     port, sourceName, hotkey, nativeReady, targetAvailable, error: error || (sharing.active ? nativeReason : '') };
 }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', state()); }
@@ -98,6 +99,7 @@ function finishRecording() {
 async function sources() {
   if (!nativeReady) throw new Error('原生组件尚未就绪，请稍后重试或重启程序');
   const response = await native.request('windows', { excludePid: process.env.GHOSTCURSOR_E2E ? 0 : process.pid });
+  if (process.platform === 'darwin') return selectableWindows(response.windows);
   const ownId = `window:${window.getNativeWindowHandle().readBigUInt64LE()}:0`;
   return selectableWindows(response.windows).filter(s => s.id !== ownId);
 }
@@ -107,7 +109,7 @@ app.whenReady().then(async () => {
   window = new BrowserWindow({ width: 1160, height: 820, minWidth: 940, minHeight: 700, title: 'GhostCursor',
     icon: join(__dirname, '../../assets/icon.png'),
     backgroundColor: '#f3f5fa', titleBarStyle: 'hidden', titleBarOverlay: { color: '#f3f5fa', symbolColor: '#26354a', height: 40 },
-    ...(!compatibility && windowsBuild >= 22000 ? { backgroundMaterial: 'mica' as const } : {}), autoHideMenuBar: true,
+    ...(process.platform === 'win32' && !compatibility && windowsBuild >= 22000 ? { backgroundMaterial: 'mica' as const } : {}), autoHideMenuBar: true,
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', e => e.preventDefault());
@@ -125,6 +127,11 @@ app.whenReady().then(async () => {
   const handle = (name: string, callback: (...args: any[]) => any) => ipcMain.handle(name, (e, ...args) => { if (!trusted(e)) throw new Error('无效调用'); return callback(...args); });
   const on = (name: string, callback: (...args: any[]) => void) => ipcMain.on(name, (e, ...args) => { if (trusted(e)) callback(...args); });
   handle('state', state); handle('sources', sources);
+  handle('request-permissions', async () => {
+    if (process.platform !== 'darwin') return;
+    const result = await native.request('permissions', { prompt: true });
+    permissions = result.permissions; publish();
+  });
   handle('diagnostics', () => native.request('snapshot'));
   handle('relay-start', (id: string, sessionId: string, streamId: number, mime: string) => server.relayStart(id, sessionId, streamId, mime));
   handle('relay-chunk', (id: string, sessionId: string, streamId: number, sequence: number, data: ArrayBuffer) => server.relayChunk(id, sessionId, streamId, sequence, data));
@@ -234,14 +241,16 @@ app.whenReady().then(async () => {
     }
   }, 16); ticker.unref();
   native.on('status', status => {
+    if (process.platform === 'darwin' && status.permissions) permissions = status.permissions;
     targetAvailable = !!status.available; nativeReason = status.reason || '';
     if (status.enabled === false && Number.isSafeInteger(status.epoch)) controls.nativeRevoked(status.epoch, nativeReason || '系统已停止远程控制');
     if (!targetAvailable && sharing.enabled) { sharing.revoke(nativeReason); syncGrant(); }
     event({ type: 'native-status', available: targetAvailable, reason: nativeReason }); publish();
     if (status.closed && sharing.active) void stop();
   });
-  native.on('failure', () => {
+  native.on('failure', (failure: Error) => {
     if (quitting) return;
+    if (process.env.GHOSTCURSOR_E2E) console.error('Native bridge:', failure.message);
     nativeReady = false; error = '原生组件已断开，已停止共享。请重启程序。';
     void stop();
   });
@@ -262,7 +271,13 @@ app.whenReady().then(async () => {
   presentation();
   server.setNetwork(network);
   await window.loadFile(join(webRoot, 'index.html'));
-  try { await native.launch(app.isPackaged ? join(process.resourcesPath, 'native/GhostCursor.Native.exe') : join(__dirname, '../native/GhostCursor.Native.exe')); await native.request('appearance', cursor); nativeReady = true; }
+  try {
+    const executable = process.platform === 'darwin' ? 'GhostCursor.Native' : 'GhostCursor.Native.exe';
+    await native.launch(app.isPackaged ? join(process.resourcesPath, 'native', executable) : join(__dirname, '../native', executable));
+    await native.request('appearance', cursor);
+    if (process.platform === 'darwin') permissions = (await native.request('permissions')).permissions;
+    nativeReady = true;
+  }
   catch (e) { error = `原生组件启动失败：${(e as Error).message}`; }
   publish();
 });

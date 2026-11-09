@@ -26,6 +26,7 @@ export function Host() {
   const frameProbe = useRef<HTMLVideoElement>(null);
   const fail = (error: unknown) => { const text = String((error as Error).message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''); console.error('[GhostCursor]', text); void message.error(text); };
   useEffect(() => { document.documentElement.classList.toggle('graphics-compatible', state.graphics.compatibility); }, [state.graphics.compatibility]);
+  useEffect(() => { document.documentElement.classList.toggle('platform-mac', state.platform === 'darwin'); }, [state.platform]);
   useEffect(() => {
     const accept = (next: HostState) => { setState(next); if (!next.sharing) { media.current?.stop(); setStream(undefined); } };
     api.state().then(accept).catch(fail);
@@ -97,11 +98,12 @@ export function Host() {
     <div className="titlebar"><div className="brand-mark"><span className="cursor-logo" />GhostCursor</div></div>
     <aside className="sidebar"><div className="workspace-label">工作空间</div>
       {[['share', <AppstoreOutlined />, '窗口共享'], ['visitors', <TeamOutlined />, '访客管理'], ['settings', <SettingOutlined />, '设置']].map(([key, icon, label]) => <button key={String(key)} className={`nav-item ${tab === key ? 'selected' : ''}`} onClick={() => setTab(String(key))}>{icon}<span>{label}</span>{key === 'visitors' && state.visitors.length > 0 && <b>{state.visitors.length}</b>}</button>)}
-      <div className="sidebar-bottom"><div className={`status-dot ${state.sharing ? 'on' : ''}`} /><span>{state.sharing ? '共享服务运行中' : '准备就绪'}</span><small>GhostCursor · 0.2.2</small></div>
+      <div className="sidebar-bottom"><div className={`status-dot ${state.sharing ? 'on' : ''}`} /><span>{state.sharing ? '共享服务运行中' : '准备就绪'}</span><small>GhostCursor · 0.3.0</small></div>
     </aside>
     <main className="main-content">
       <header className="page-header"><div><div className="eyebrow">GHOSTCURSOR / {tab === 'share' ? 'SHARE' : tab === 'visitors' ? 'PEOPLE' : 'SETTINGS'}</div><h1>{tab === 'share' ? '让协作，就在眼前。' : tab === 'visitors' ? '一起看，一起协作。' : '按你的习惯来。'}</h1><p>{tab === 'share' ? '分享一个窗口，让对方看见你正在做的事。' : tab === 'visitors' ? '查看在线访客，掌握每一次控制授权。' : '简单设置，随时开始下一次共享。'}</p></div><Tag bordered={false} className="header-tag" icon={state.sharing ? <CheckCircleFilled /> : <LockOutlined />} color={state.sharing ? 'green' : 'default'}>{state.sharing ? '正在共享' : '仅本地运行'}</Tag></header>
       {state.error && <Alert className="state-alert" type={state.nativeReady ? 'info' : 'error'} showIcon title={state.error} />}
+      {state.platform === 'darwin' && state.permissions && (!state.permissions.screen || !state.permissions.accessibility) && <Alert className="state-alert" type="warning" showIcon title="设置 macOS 权限" description="在系统设置 → 隐私与安全性中允许 GhostCursor 录制屏幕和使用辅助功能。录屏用于共享画面，辅助功能用于你授权后的鼠标控制。允许录屏后可能需要退出并重新打开应用。" action={<Button onClick={() => { void api.requestPermissions().catch(fail); }}>请求 / 刷新权限</Button>} />}
       {tab === 'share' && <>
         <section className="share-grid">
           <div className="surface preview-panel"><div className="section-heading"><h3><DesktopOutlined /> 共享窗口</h3>{state.sharing ? <span className="live-badge"><i /> 实时画面</span> : <span className="muted">只分享你选择的窗口</span>}</div>

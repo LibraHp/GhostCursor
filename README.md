@@ -2,13 +2,46 @@
 
 将一个应用窗口共享到网页，让远端访客观看画面，并在你本机的对应共享窗口上显示访客鼠标的位置标记。你可以用全局快捷键开启或关闭指定访客的远程控制；授权后，访客操作你现有的系统鼠标。
 
-Windows 桌面端与访客网页已实现。界面使用 Ant Design，采用 Windows 11 风格的浅色背景、圆角面板和蓝色强调。
+Windows / macOS 桌面端与访客网页。界面使用 Ant Design，采用 Windows 11 风格的浅色背景、圆角面板和蓝色强调。
 
-0.2.2 源码新增 WebSocket 视频转发、WebRTC 固定 UDP 映射模式、自动 STUN、图形兼容模式、图形诊断，以及 FRP 公网地址和可选的 WebRTC STUN/TURN 设置。自动图形模式在 Win10 关闭 Electron 硬件加速并减少界面动画。按本次要求，最新网络改动未编译、未测试，未生成 0.2.2 分发包。
+支持 WebSocket 单端口视频转发、普通 WebRTC 自动 STUN / 手动 TURN，以及固定 UDP 端口映射。v0.3.0 新增 macOS Swift 原生组件和 Windows / Mac 自动发布工作流。macOS 为首次发布，尚需真实设备验证录屏、控制、全屏与 Retina 等场景。
+
+## 实际运行截图
+
+以下图片由实际运行的 **Windows 桌面端、原生辅助组件与 Edge 浏览器**采集，展示共享独立演示窗口的本机流程；不是设计稿，也未模拟应用状态。Mac 界面与权限流程需在 Mac 实机确认。
+
+**桌面端：共享指定窗口、邀请访客与管理控制权**
+
+![GhostCursor 桌面端正在共享演示窗口](docs/images/host-sharing.png)
+
+**访客端：浏览器接收真实视频流**
+
+![Edge 浏览器观看 GhostCursor 实时共享画面](docs/images/viewer-live.png)
+
+<details>
+<summary>查看画质、鼠标样式与网络设置</summary>
+
+![GhostCursor 实际运行的设置页面](docs/images/settings.png)
+
+</details>
+
+截图版本与采集方式见 [截图记录](docs/images/capture-info.json)，可用 `node scripts/screenshots.mjs` 在已构建的 Windows 开发环境重新采集（需要 Edge，会打开专用演示窗口）。
+
+## 下载
+
+从 [GitHub Releases](https://github.com/LibraHp/GhostCursor/releases/latest) 下载最新版，校验值位于同一版本的 `SHA256SUMS.txt`。
+
+| 系统 | 文件 |
+| --- | --- |
+| Windows 10 2004+ / 11，x64 | `windows-x64-nsis.exe` 安装版 / `windows-x64-portable.exe` 便携版 |
+| macOS 13+，Apple Silicon | `macos-arm64.dmg` / `macos-arm64.zip` |
+| macOS 13+，Intel | `macos-x64.dmg` / `macos-x64.zip` |
+
+Mac 应用移入「应用程序」后，按 [macOS 权限说明](docs/macos.md) 开启录屏与辅助功能。Mac 安装包采用 ad-hoc 签名，尚无 Developer ID 签名和 Apple 公证；系统可能需要你在「隐私与安全性」中允许打开。
 
 ## 运行
 
-开发环境需要 **Windows x64、Node.js 22.12+（推荐 24）、.NET 10 SDK**。
+开发环境需要 **Node.js 22.12+（推荐 24）**；Windows x64 另需 **.NET 10 SDK**，macOS 13+ 另需 **Xcode Command Line Tools**（`xcode-select --install`）。
 
 ```powershell
 npm install
@@ -17,26 +50,20 @@ npm start
 
 `npm start` 会完成类型检查、前端构建、Electron 主进程构建和原生程序发布，再启动桌面端。已经构建过可运行 `npm run start:app`。
 
-打包后的程序自带 Chromium 和 .NET 运行时，使用者无需安装 Node.js 或 .NET。
-
-此前 0.2.1 分发文件（不包含最新图形与外网改动）：
-
-- [安装版](<release/GhostCursor Setup 0.2.1.exe>)
-- [单文件便携版](<release/GhostCursor 0.2.1.exe>)
-- [SHA256 校验值](release/SHA256SUMS.txt)
+打包后的程序自带 Chromium；Windows 版同时自带 .NET 运行时，Mac 版包含对应架构的 Swift 原生组件，使用者无需安装开发环境。
 
 ## 使用流程
 
 1. 你启动 GhostCursor，选择要共享的应用窗口并开启 Web 服务。
 2. 将加入链接发给访客，访客通过浏览器打开实时画面。
 3. 将共享窗口切到前台。访客在网页画面上移动鼠标，你能在本机对应窗口上看到位置标记；默认只显示位置，不移动你的系统鼠标，也不执行点击。
-4. 在“在线访客”中选择一位控制者，再点击“开启控制”。程序会尝试将共享窗口切到前台，并等待 Windows 原生程序确认授权；访客看到“你已获得鼠标控制权限”后即可操作。仅勾选“控制者”不会开启权限。
+4. 在“在线访客”中选择一位控制者，再点击“开启控制”。程序会尝试将共享窗口切到前台，并等待原生组件确认授权；访客看到“你已获得鼠标控制权限”后即可操作。仅勾选“控制者”不会开启权限。
 5. 按 `Ctrl+Alt+F8` 或点击“收回控制”即可撤销；在“设置”中点击快捷键按钮，再直接按下新组合键即可保存，按 Esc 取消。若切换失败，请手动切回共享窗口，再按快捷键。
 6. 停止共享后，视频、远程输入和加入链接一并失效。
 
 通过 FRP 分享时，先停止共享，在「设置 → 外网与 FRP」选择「WebSocket · FRP 单端口」，填写公网邀请地址并保存，再开启共享。视频、位置标记和已授权操作共用现有网页端口，无需 STUN/TURN；使用 HTTP/HTTPS 反向代理时需转发 `/ws` 的 WebSocket Upgrade。新设置默认使用 WebSocket，旧版保存的设置仍保留 WebRTC，需要手动切换。详见 [FRP 部署说明](docs/frp.md)。
 
-WebRTC 模式支持「自动配置 STUN」：从 [always-online-stun 的 TCP 地址列表](https://github.com/pradt2/always-online-stun/blob/master/valid_hosts_tcp.txt)获取候选项，随机抽取最多 12 项并确认本机 UDP STUN 响应，选择最多 3 个地址同步给主持人与访客。列表中的 TCP 可用性不等于 Chromium WebRTC 可用性，因此不会强制设置 STUN TCP。保存或开始共享时自动获取，缓存 1 小时，过期后在下次使用时更新；可在停止共享时点击「立即更新」。下载超时或没有兼容响应时使用缓存或默认地址，首次获取可能耗时约数秒。新设置默认开启，旧设置若含自定义 STUN 地址则保留手动配置，可主动打开开关；WebSocket 和强制 TURN 模式不会获取列表。此自动配置源码按要求未编译、未运行测试。
+WebRTC 模式支持「自动配置 STUN」：从 [always-online-stun 的 TCP 地址列表](https://github.com/pradt2/always-online-stun/blob/master/valid_hosts_tcp.txt)获取候选项，随机抽取最多 12 项并确认本机 UDP STUN 响应，选择最多 3 个地址同步给主持人与访客。列表中的 TCP 可用性不等于 Chromium WebRTC 可用性，因此不会强制设置 STUN TCP。保存或开始共享时自动获取，缓存 1 小时，过期后在下次使用时更新；可在停止共享时点击「立即更新」。下载超时或没有兼容响应时使用缓存或默认地址，首次获取可能耗时约数秒。新设置默认开启，旧设置若含自定义 STUN 地址则保留手动配置，可主动打开开关；WebSocket、固定 UDP 和强制 TURN 模式不会获取列表。STUN 响应成功不保证跨网络直连。
 
 有两个可映射端口时，可选择「WebRTC · 固定 UDP」：一个 TCP 端口用于网页和信令，一个 UDP 端口用于视频及鼠标数据通道。填写本机媒体 UDP 端口、映射后的公网 IPv4 和公网 UDP 端口，保存后重新共享，无需重启。此模式无需 STUN/TURN，一次仅支持一位访客；需要真实的 UDP 转发及访客网络允许 UDP，两个 TCP 映射无法代替。详见 [固定 UDP 映射说明](docs/udp-mapping.md)。
 
@@ -58,7 +85,7 @@ WebRTC 模式支持「自动配置 STUN」：从 [always-online-stun 的 TCP 地
 
 | 项目 | 实现 |
 | --- | --- |
-| 主持人平台 | Windows 10 2004+ / Windows 11，x64 |
+| 主持人平台 | Windows 10 2004+ / Windows 11 x64；macOS 13+ Intel / Apple Silicon（新增，待实机验收） |
 | 访客端 | WebSocket 视频需 MediaSource 及兼容编码，推荐新版 Edge / Chrome；另可选 WebRTC；输入使用 Pointer Events |
 | 共享范围 | 一个指定应用窗口 |
 | 网络 | 局域网；外网可选 WebSocket 单端口、WebRTC + STUN/TURN，或 TCP 网页 + 固定 UDP 媒体映射 |
@@ -79,6 +106,7 @@ WebRTC 模式支持「自动配置 STUN」：从 [always-online-stun 的 TCP 地
 - **React + Vite**：桌面设置界面和访客网页。
 - **WebSocket + MediaRecorder / MediaSource，或 WebRTC**：编码视频、鼠标位置及控制消息与信令，不使用截图轮询。
 - **C# + .NET 10 + WPF/Win32**：原生辅助进程，负责透明位置标记、窗口坐标、目标验证和系统鼠标输入；通过本机命名管道与 Electron 通信。
+- **Swift + AppKit / CoreGraphics / Accessibility**：macOS 窗口枚举、透明标记、权限检查和受控鼠标输入；通过私有 Unix socket 与 Electron 通信。
 - **electron-builder**：打包桌面端和原生辅助程序。
 
 位置标记使用不拦截点击、不抢焦点的透明悬浮层，并随共享窗口移动和缩放。坐标按视频实际内容区域计算，排除黑边；捕获宽高比与窗口不匹配时暂停位置显示和输入，避免错误定位。
@@ -91,7 +119,9 @@ npm test            # 坐标、授权、消息校验与 HTTP/WebSocket 集成测
 npm run build       # 生成 dist/web、dist/electron 和 dist/native
 npm run test:smoke  # Windows 实机链路验收，需要已构建并安装 Microsoft Edge
 npm run pack        # 生成 release/win-unpacked/GhostCursor.exe 及配套文件
-npm run dist        # 生成 NSIS 安装包与单文件便携版
+npm run dist        # 在当前系统生成发布包
+npm run dist:win    # Windows：NSIS 安装包与单文件便携版
+npm run dist:mac    # macOS：当前架构 DMG 与 ZIP
 ```
 
 `release/win-unpacked` 必须保留完整目录，不能只复制其中的 exe。安装包与便携版会包含所需文件。
@@ -100,10 +130,26 @@ npm run dist        # 生成 NSIS 安装包与单文件便携版
 
 自动测试覆盖坐标、授权、消息和服务，以及原生确认、授权取消竞争、触摸消息权限隔离与设置校验。实机验收包含带边框窗口捕获、画质 / 帧率热切换、快捷键录制与取消、鼠标样式同步、控制时单一指针和收回后的恢复、旁观者权限隔离、窗口大小变化、前台切换、按住鼠标时断线清理，并使用 Edge 触摸事件模拟检查移动端。实机移动设备、跨设备局域网、防火墙、多显示器和其他 DPI 组合仍需在对应设备上验证。
 
+v0.3.0 本次执行构建与实际运行截图采集，未执行自动测试套件；上述验收脚本及历史结果不代表 Mac 新原生组件已通过实机验收。
+
+## 自动构建与发布
+
+[Build and release 工作流](.github/workflows/release.yml) 使用 Windows、Mac Intel、Mac Apple Silicon 三种 runner，分别编译原生组件与桌面应用，生成 6 个安装包。只有三个构建均成功后，才创建草稿 Release、上传全部安装包与 SHA256 校验值并公开发布。
+
+更新 `package.json`、`package-lock.json` 中的版本与发布说明后，推送对应标签即可发布：
+
+```bash
+git tag v0.3.0
+git push origin main
+git push origin v0.3.0
+```
+
+也可在 Actions 中手动运行，填写与 package.json 一致的标签名。关闭「publish」只构建当前分支并上传 artifacts，无需先创建标签；开启则构建已有标签并发布。已公开的 Release 不会被工作流覆盖。Mac 签名、公证、权限与实机验收说明见 [macOS 文档](docs/macos.md)。
+
 ## 使用限制
 
 - WebSocket 视频与输入共用网页端口，无需 TURN，但 TCP 拥塞和浏览器缓冲可能增加延迟。每位访客独立编码，会增加主持人的 CPU 和上行带宽开销；建议先用流畅 / 720p / 15 帧及 1–3 位访客。播放格式由两端运行时协商，部分移动浏览器可能不支持，界面会提示切换浏览器或改用 WebRTC。
-- WebRTC 模式内置默认 STUN 尝试直连，也可填写自有 TURN。仅映射网页端口不保证 WebRTC 视频连通，复杂 NAT 需要可用 TURN；参见 [FRP 部署说明](docs/frp.md) 和 [coturn 示例](deploy/turnserver.conf.example)。公网 HTTPS 和中继服务器需自行配置；最新 WebSocket 源码未编译、未测试，也未做实际公网验证。
+- WebRTC 模式可自动配置 STUN，也可填写自有 TURN。仅映射网页端口不保证 WebRTC 视频连通，复杂 NAT 可能需要 TURN 或改用 WebSocket；参见 [FRP 部署说明](docs/frp.md) 和 [coturn 示例](deploy/turnserver.conf.example)。公网 HTTPS 和中继服务器需自行配置，FRP / Lucky 公网连通性尚需实际网络验证。
 - 默认端口为 `3210`。首次使用可按 Windows 提示允许专用网络访问；选择邀请面板中的局域网地址，对方才能从其他设备访问。本机测试地址 `127.0.0.1` 仅供本机使用。
 - 为限定操作范围，目标窗口需处于前台。切走、最小化、遮挡输入落点、画面尺寸不匹配时暂停输入；切走会收回控制，回来后需重新按快捷键授权。
 - 首版只支持目标顶层窗口内的鼠标移动、左/中/右键、拖动及纵向滚轮；独立弹窗、菜单、管理员权限窗口、受保护画面和某些游戏可能无法捕获或控制。不自动提升权限。
@@ -118,6 +164,7 @@ src/electron/               桌面主进程、Web 服务、会话和原生桥接
 src/web/                    React + Ant Design 主持人与访客界面
 src/shared/                 消息协议、校验和坐标映射
 native/GhostCursor.Native/  WPF 标记与 Win32 输入辅助程序
+native/GhostCursor.Mac/     Swift / AppKit 标记与 CoreGraphics 输入辅助程序
 tests/                      核心逻辑、服务集成与 Windows 验收辅助脚本
 scripts/                    构建、实机验收和图标生成
 assets/                     应用图标

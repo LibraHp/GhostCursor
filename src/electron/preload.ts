@@ -11,6 +11,7 @@ const api: GhostBridge = {
   setGraphics: mode => ipcRenderer.invoke('set-graphics', mode),
   setNetwork: value => ipcRenderer.invoke('set-network', value),
   refreshStun: () => ipcRenderer.invoke('refresh-stun'),
+  requestPermissions: () => ipcRenderer.invoke('request-permissions'),
   restart: () => ipcRenderer.invoke('restart'), copyGraphicsDiagnostics: () => ipcRenderer.invoke('copy-graphics-diagnostics'),
   disconnect: (id, reason) => ipcRenderer.invoke('disconnect', id, reason),
   diagnostics: () => ipcRenderer.invoke('diagnostics'),

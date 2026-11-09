@@ -5,6 +5,8 @@ import type { AutoStunResult, NetworkSettings } from './network';
 export interface WindowSource { id: string; name: string; thumbnail: string }
 export interface Visitor { id: string; name: string; color: string; connectedAt: number }
 export interface HostState {
+  platform?: string;
+  permissions?: { screen: boolean; accessibility: boolean };
   sharing: boolean; sessionId: string; visitors: Visitor[]; controller: string | null;
   controlEnabled: boolean; epoch: number; links: string[]; port: number;
   controlPending: boolean; controlReason: string;
@@ -35,6 +37,7 @@ export interface GhostBridge {
   setGraphics(mode: GraphicsMode): Promise<void>;
   setNetwork(value: NetworkSettings): Promise<void>;
   refreshStun(): Promise<AutoStunResult>;
+  requestPermissions(): Promise<void>;
   restart(): Promise<void>; copyGraphicsDiagnostics(): Promise<void>;
   disconnect(id: string, reason?: string): Promise<void>;
   diagnostics(): Promise<{ successfulInputs: number; visibleMarkers: number; available: boolean; reason: string }>;

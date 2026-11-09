@@ -1,8 +1,8 @@
 {
   "name": "ghostcursor",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
-  "description": "Windows 窗口共享与访客鼠标协作",
+  "description": "Windows / macOS 窗口共享与访客鼠标协作",
   "author": "GhostCursor",
   "license": "UNLICENSED",
   "main": "dist/electron/main.cjs",
@@ -13,7 +13,9 @@
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --win nsis portable",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never",
     "test:smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
@@ -63,10 +65,29 @@
       "icon": "assets/icon.ico",
       "signExecutable": false
     },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "artifactName": "GhostCursor-${version}-macos-${arch}.${ext}",
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "notarize": false,
+      "extendInfo": {
+        "NSHighResolutionCapable": true,
+        "NSScreenCaptureUsageDescription": "GhostCursor 仅录制你选择的窗口，以便访客在浏览器中观看。",
+        "NSAccessibilityUsageDescription": "GhostCursor 仅在你明确授权指定访客后，操作所选窗口中的系统鼠标。"
+      }
+    },
     "nsis": {
+      "artifactName": "GhostCursor-${version}-windows-${arch}-nsis.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "portable": {
+      "artifactName": "GhostCursor-${version}-windows-${arch}-portable.${ext}"
     },
     "electronDist": "node_modules/electron/dist",
     "npmRebuild": false
