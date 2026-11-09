@@ -1,6 +1,6 @@
 import type { VideoSettings, CursorSettings } from './settings';
 import type { GraphicsMode, GraphicsState } from './graphics';
-import type { NetworkSettings } from './network';
+import type { AutoStunResult, NetworkSettings } from './network';
 
 export interface WindowSource { id: string; name: string; thumbnail: string }
 export interface Visitor { id: string; name: string; color: string; connectedAt: number }
@@ -11,6 +11,7 @@ export interface HostState {
   video: VideoSettings; cursor: CursorSettings;
   graphics: GraphicsState;
   network: NetworkSettings;
+  autoStunResult?: AutoStunResult;
   sourceName: string; hotkey: string; nativeReady: boolean; targetAvailable: boolean; error: string;
 }
 export type PointerMessage = {
@@ -33,6 +34,7 @@ export interface GhostBridge {
   setCursor(value: CursorSettings): Promise<void>;
   setGraphics(mode: GraphicsMode): Promise<void>;
   setNetwork(value: NetworkSettings): Promise<void>;
+  refreshStun(): Promise<AutoStunResult>;
   restart(): Promise<void>; copyGraphicsDiagnostics(): Promise<void>;
   disconnect(id: string, reason?: string): Promise<void>;
   diagnostics(): Promise<{ successfulInputs: number; visibleMarkers: number; available: boolean; reason: string }>;

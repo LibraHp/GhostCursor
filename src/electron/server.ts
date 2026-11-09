@@ -68,14 +68,15 @@ export class SharingServer extends EventEmitter {
             const token = typeof data.token === 'string' ? data.token : '';
             const expected = this.session.token;
             if (data.type !== 'join' || !this.session.active || !expected || Buffer.byteLength(token) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(token), Buffer.from(expected))) { ws.close(4003, '加入链接无效或已失效'); return; }
-            if (this.clients.size >= 8) { ws.close(4008, '当前会话最多支持 8 位访客'); return; }
+            const maxVisitors = this.network.transport === 'webrtc-mapped' ? 1 : 8;
+            if (this.clients.size >= maxVisitors) { ws.close(4008, maxVisitors === 1 ? '固定 UDP 模式一次仅支持一位访客，请等待当前访客离开' : '当前会话最多支持 8 位访客'); return; }
             clearTimeout(timeout); id = randomUUID();
             const name = typeof data.name === 'string' ? data.name.trim().replace(/[\p{Cc}\p{Cf}]/gu, '').slice(0, 24) : '';
             const used = new Set([...this.session.visitors.values()].map(v => v.color));
             const color = colors.find(c => !used.has(c)) || colors[0];
             const visitor = { id, name: name || `访客 ${this.clients.size + 1}`, color, connectedAt: Date.now() };
             this.clients.set(id, ws); this.session.visitors.set(id, visitor);
-            this.send(id, { type: 'welcome', id, name: visitor.name, color, sessionId: this.session.id, transport: this.network.transport, ...(this.network.transport === 'webrtc' ? { rtc: rtcConfiguration(this.network) } : {}) });
+            this.send(id, { type: 'welcome', id, name: visitor.name, color, sessionId: this.session.id, transport: this.network.transport, ...(this.network.transport !== 'websocket' ? { rtc: rtcConfiguration(this.network) } : {}) });
             this.send(id, { type: 'presentation', ...this.presentation });
             this.emit('join', visitor); this.broadcastState();
           } else if (this.network.transport === 'websocket' && data.type === 'relay-ready') {
@@ -93,7 +94,7 @@ export class SharingServer extends EventEmitter {
             const relay = this.relay.get(id);
             if (relay && relay.streamId === data.streamId) this.emit('pointer', id, data.message);
           }
-          else if (this.network.transport === 'webrtc' && validSignal(data)) this.emit('signal', id, data);
+          else if (this.network.transport !== 'websocket' && validSignal(data)) this.emit('signal', id, data);
           else ws.close(4002, '无效信令');
         } catch { ws.close(4002, '无效消息'); }
       });

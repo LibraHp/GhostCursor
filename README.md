@@ -4,7 +4,7 @@
 
 Windows 桌面端与访客网页已实现。界面使用 Ant Design，采用 Windows 11 风格的浅色背景、圆角面板和蓝色强调。
 
-0.2.2 源码新增 WebSocket 视频转发、图形兼容模式、图形诊断，以及 FRP 公网地址和可选的 WebRTC STUN/TURN 设置。自动图形模式在 Win10 关闭 Electron 硬件加速并减少界面动画。按本次要求，最新网络改动未编译、未测试，未生成 0.2.2 分发包。
+0.2.2 源码新增 WebSocket 视频转发、WebRTC 固定 UDP 映射模式、自动 STUN、图形兼容模式、图形诊断，以及 FRP 公网地址和可选的 WebRTC STUN/TURN 设置。自动图形模式在 Win10 关闭 Electron 硬件加速并减少界面动画。按本次要求，最新网络改动未编译、未测试，未生成 0.2.2 分发包。
 
 ## 运行
 
@@ -36,6 +36,10 @@ npm start
 
 通过 FRP 分享时，先停止共享，在「设置 → 外网与 FRP」选择「WebSocket · FRP 单端口」，填写公网邀请地址并保存，再开启共享。视频、位置标记和已授权操作共用现有网页端口，无需 STUN/TURN；使用 HTTP/HTTPS 反向代理时需转发 `/ws` 的 WebSocket Upgrade。新设置默认使用 WebSocket，旧版保存的设置仍保留 WebRTC，需要手动切换。详见 [FRP 部署说明](docs/frp.md)。
 
+WebRTC 模式支持「自动配置 STUN」：从 [always-online-stun 的 TCP 地址列表](https://github.com/pradt2/always-online-stun/blob/master/valid_hosts_tcp.txt)获取候选项，随机抽取最多 12 项并确认本机 UDP STUN 响应，选择最多 3 个地址同步给主持人与访客。列表中的 TCP 可用性不等于 Chromium WebRTC 可用性，因此不会强制设置 STUN TCP。保存或开始共享时自动获取，缓存 1 小时，过期后在下次使用时更新；可在停止共享时点击「立即更新」。下载超时或没有兼容响应时使用缓存或默认地址，首次获取可能耗时约数秒。新设置默认开启，旧设置若含自定义 STUN 地址则保留手动配置，可主动打开开关；WebSocket 和强制 TURN 模式不会获取列表。此自动配置源码按要求未编译、未运行测试。
+
+有两个可映射端口时，可选择「WebRTC · 固定 UDP」：一个 TCP 端口用于网页和信令，一个 UDP 端口用于视频及鼠标数据通道。填写本机媒体 UDP 端口、映射后的公网 IPv4 和公网 UDP 端口，保存后重新共享，无需重启。此模式无需 STUN/TURN，一次仅支持一位访客；需要真实的 UDP 转发及访客网络允许 UDP，两个 TCP 映射无法代替。详见 [固定 UDP 映射说明](docs/udp-mapping.md)。
+
 移动端同样可以加入：在视频实际内容区域按下或滑动手指，网页和本机共享窗口会显示彩色触摸圆点；抬起、取消或切到后台时隐藏。默认仅显示位置，开启控制后，单指点按和拖动映射为鼠标左键操作。支持触控笔位置；暂不提供多指手势。
 
 在共享预览上方或“设置”中可切换流畅（最高 720p / 默认 15 帧）、高清（最高 1080p / 默认 30 帧）、超清（最高 1440p / 默认 60 帧），也可独立选择 15 / 24 / 30 / 60 帧。共享中立即生效，访客无需重新加入。分辨率和帧率为上限，实际效果取决于窗口大小、应用刷新、设备性能和网络。
@@ -57,11 +61,11 @@ npm start
 | 主持人平台 | Windows 10 2004+ / Windows 11，x64 |
 | 访客端 | WebSocket 视频需 MediaSource 及兼容编码，推荐新版 Edge / Chrome；另可选 WebRTC；输入使用 Pointer Events |
 | 共享范围 | 一个指定应用窗口 |
-| 网络 | 局域网；外网可通过 FRP / 反向代理的同一端口转发 WebSocket 视频，或使用 WebRTC + STUN/TURN |
+| 网络 | 局域网；外网可选 WebSocket 单端口、WebRTC + STUN/TURN，或 TCP 网页 + 固定 UDP 媒体映射 |
 | 视频传输 | Electron 指定窗口捕获 + MediaRecorder / MediaSource 编码转发，或 Chromium WebRTC；分辨率独立选择，最高 60 fps，可实时切换 |
 | 会话与消息 | WebSocket 模式共用视频与输入连接；WebRTC 模式使用 WebSocket 信令与 DataChannel 输入；均保留主持人授权校验 |
 | 访客位置 | 可设置形状、大小、颜色的透明悬浮标记，显示访客名称；触摸/笔显示圆形标记 |
-| 远程控制 | 默认关闭，最多 8 位访客、同时最多一位控制 |
+| 远程控制 | 默认关闭，最多 8 位访客、同时最多一位控制；固定 UDP 模式一次最多一位访客 |
 | 全局快捷键 | 默认 `Ctrl+Alt+F8`，在设置中直接按组合键录制 |
 | 初期输入 | 鼠标移动、点击、拖动和滚轮 |
 

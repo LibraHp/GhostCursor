@@ -1,6 +1,7 @@
 import type { GhostBridge, HostEvent, Signal } from '../shared/protocol';
 import { DEFAULT_VIDEO, VIDEO_PRESETS, videoConstraints, initialVideoConstraints, type VideoSettings } from '../shared/settings';
-import { DEFAULT_NETWORK, NETWORK_FAILURE, rtcConfiguration, type NetworkSettings } from '../shared/network';
+import { DEFAULT_NETWORK, connectionFailure, rtcConfiguration, type NetworkSettings } from '../shared/network';
+import { mappedCandidate } from '../shared/mapped-ice';
 import { RelaySender } from './relay-sender';
 
 type Peer = { pc: RTCPeerConnection; channel: RTCDataChannel; candidates: RTCIceCandidateInit[]; chain: Promise<void>; timeout?: ReturnType<typeof setTimeout> };
@@ -91,7 +92,7 @@ export class HostMedia {
     }
   }
   private event(event: HostEvent) {
-    if (event.type === 'visitor-joined') { if (this.ready && this.network.transport === 'webrtc') void this.connect(event.visitor.id); else if (!this.ready) this.waiting.add(event.visitor.id); }
+    if (event.type === 'visitor-joined') { if (this.ready && this.network.transport !== 'websocket') void this.connect(event.visitor.id); else if (!this.ready) this.waiting.add(event.visitor.id); }
     if (event.type === 'relay-ready') { if (this.ready) this.connectRelay(event.id, event.mimeTypes); else this.relayWaiting.set(event.id, event.mimeTypes); }
     if (event.type === 'visitor-left') { this.waiting.delete(event.id); this.relayWaiting.delete(event.id); this.relays.get(event.id)?.stop(); this.relays.delete(event.id); const peer = this.peers.get(event.id); clearTimeout(peer?.timeout); peer?.pc.close(); this.peers.delete(event.id); }
     if (event.type === 'signal') {
@@ -113,18 +114,35 @@ export class HostMedia {
     const channel = pc.createDataChannel('cursor', { ordered: true });
     const peer: Peer = { pc, channel, candidates: [], chain: Promise.resolve() };
     this.peers.set(id, peer);
-    const fail = () => {
+    const fail = (reason = connectionFailure(this.network.transport)) => {
       if (this.peers.get(id) !== peer) return;
       clearTimeout(peer.timeout); this.peers.delete(id); pc.close();
-      this.onError(NETWORK_FAILURE); void this.api.disconnect(id, '视频连接失败，请检查 TURN 中继配置后重新加入').catch(() => {});
+      this.onError(reason); void this.api.disconnect(id, reason).catch(() => {});
     };
-    peer.timeout = setTimeout(fail, 45000);
+    peer.timeout = setTimeout(() => fail(), 45000);
     channel.onopen = () => clearTimeout(peer.timeout);
     channel.onmessage = event => {
       if (typeof event.data !== 'string' || event.data.length > 2048) return;
       try { this.api.pointer(id, JSON.parse(event.data)); } catch {}
     };
-    pc.onicecandidate = event => { if (event.candidate) this.api.signal(id, { type: 'ice', data: event.candidate.toJSON() }); };
+    let advertised = false;
+    const published = new Set<string>();
+    pc.onicecandidate = event => {
+      if (this.peers.get(id) !== peer || !event.candidate) return;
+      const candidate = event.candidate.toJSON();
+      this.api.signal(id, { type: 'ice', data: candidate });
+      if (this.network.transport === 'webrtc-mapped') {
+        const mapped = mappedCandidate(candidate, this.network.mappedUdp);
+        const key = mapped ? `${mapped.sdpMid}:${mapped.sdpMLineIndex}:${mapped.usernameFragment}` : '';
+        if (mapped && !published.has(key)) {
+          published.add(key); advertised = true;
+          this.api.signal(id, { type: 'ice', data: mapped });
+        }
+      }
+    };
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === 'complete' && this.network.transport === 'webrtc-mapped' && !advertised) fail('未获得固定端口的 IPv4 UDP 候选地址。请确认本机端口未被占用、IPv4 可用，停止共享后重试或改用 WebSocket。');
+    };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') fail();
       if (pc.connectionState === 'connected') void this.configureSender(pc, this.settings).catch(e => this.onError((e as Error).message));
@@ -133,7 +151,7 @@ export class HostMedia {
     try {
       const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
       if (this.peers.get(id) === peer) this.api.signal(id, { type: 'offer', data: pc.localDescription!.toJSON() });
-    } catch (e) { clearTimeout(peer.timeout); pc.close(); this.peers.delete(id); this.onError(`视频连接失败：${(e as Error).message}`); void this.api.disconnect(id); }
+    } catch (e) { if (this.peers.get(id) === peer) fail(`视频连接失败：${(e as Error).message}`); }
   }
   private async receive(peer: Peer, signal: Signal) {
     if (signal.type === 'answer') {

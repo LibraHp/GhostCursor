@@ -43,6 +43,8 @@ GhostCursor 是一个由本机发起的应用窗口共享与远程协作工具�
 - 首版仅在共享窗口前台时显示位置并接受控制；前台丢失会收回控制。只有主持人明确开启控制时才尝试切到共享窗口，访客消息不得主动激活其他窗口。原生和主进程分别校验授权代次，丢弃撤销前的过期输入；原生拒绝或停止输入时立即同步撤销及具体原因。改动依赖时检查维护状态、许可证和可分发性。
 - 不引入账号平台或数据库。公网支持 WebSocket 单端口转发、可选 WebRTC STUN/TURN、公网邀请地址和 FRP WebSocket Origin；实际 HTTPS、TURN 服务器和防火墙由部署方配置。不得把 HTTP 端口映射描述为已经转发 WebRTC 视频；WebSocket 模式无需 TURN。部署见 `docs/frp.md`。
 - 网络设置仅在停止共享时修改；新设置默认 WebSocket，旧设置保留 WebRTC。WebRTC 两端在建立 offer/answer 前应用相同 ICE 配置，中继凭据仅在会话认证后发送，WebSocket 模式不发送 TURN 凭据。连接超时需按所选方式提示。用户本次明确要求不编译、不测试，该要求优先于仓库的通常验收流程。
+- WebRTC 可自动从 always-online-stun 的 `valid_hosts_tcp.txt` 选取最多 3 个 STUN 地址。TCP 名单必须先确认本机 UDP Binding 响应，不能声称名单可用就保证 WebRTC 直连，也不能把 STUN 当作 TURN。下载和检测需超时、限量、合并请求，缓存 1 小时，更新失败回退；仅保存或开始共享时刷新，不在共享中改变 ICE 配置。旧自定义地址保留手动模式；WebSocket/强制 TURN 不获取名单。
+- 固定 UDP 模式 `webrtc-mapped` 在共享前调用 Electron `setWebRTCUDPPortRange` 将 min/max 设为同一媒体端口，使用 max-bundle/rtcp-mux；额外发布映射公网 IPv4/UDP 端口的 srflx 候选，保留 LAN 候选、ICE 凭据及媒体标识，不改写本地 SDP。仅为匹配本机端口的 IPv4/mDNS UDP host 候选生成映射；无匹配候选时明确失败。该模式一次最多一位访客，不获取 STUN、不发送 TURN 设置；其他模式共享前恢复无限制端口范围。需要真实 UDP 转发，不能把两个 TCP 映射当作已支持，源码尚未编译和实网验证。
 
 ## 实现边界
 

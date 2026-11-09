@@ -5,7 +5,7 @@ import type { HostState, WindowSource } from '../shared/protocol';
 import { HostMedia } from './host-media';
 import { DEFAULT_VIDEO, DEFAULT_CURSOR, type VideoSettings, type CursorSettings } from '../shared/settings';
 import { SettingsPanel, VideoControls } from './SettingsPanel';
-import { DEFAULT_NETWORK } from '../shared/network';
+import { DEFAULT_NETWORK, transportLabel } from '../shared/network';
 
 const initial: HostState = { sharing: false, sessionId: '', visitors: [], controller: null, controlEnabled: false, controlPending: false, controlReason: '等待主持人开启控制', epoch: 0, links: [], port: 3210, sourceName: '', hotkey: 'Ctrl+Alt+F8', video: DEFAULT_VIDEO, cursor: DEFAULT_CURSOR, graphics: { mode: 'auto', compatibility: false, restartRequired: false }, network: DEFAULT_NETWORK, nativeReady: false, targetAvailable: false, error: '' };
 const api = window.ghost!;
@@ -109,7 +109,7 @@ export function Host() {
             <div className={`preview ${stream ? 'has-video' : ''}`}>
               {stream ? <video ref={video} autoPlay muted playsInline /> : <div className="preview-empty"><div className="window-illustration"><div className="illustration-bar"><i /><i /><i /></div><div className="illustration-body"><DesktopOutlined /><span className="illustration-line" /><span className="illustration-line short" /></div><span className="illustration-pointer" /></div><h3>{selected ? '窗口已准备好' : '从一个窗口开始'}</h3><p>{selected ? selected.name : '选择想分享的应用，其他内容留给自己。'}</p><Button icon={<DesktopOutlined />} onClick={() => { void choose(); }}>选择窗口</Button></div>}
             </div>
-            <div className="preview-footer"><div className="source-info"><span className="source-icon"><DesktopOutlined /></span><div><strong>{state.sharing ? state.sourceName : selected?.name || '尚未选择窗口'}</strong><small>{state.sharing ? `${state.network.transport === 'websocket' ? 'WebSocket' : 'WebRTC'} · 视频共享` : '支持桌面应用窗口'}</small></div></div>
+            <div className="preview-footer"><div className="source-info"><span className="source-icon"><DesktopOutlined /></span><div><strong>{state.sharing ? state.sourceName : selected?.name || '尚未选择窗口'}</strong><small>{state.sharing ? `${transportLabel(state.network.transport)} · 视频共享` : '支持桌面应用窗口'}</small></div></div>
               {!state.sharing && selected && <Button type="text" onClick={() => { void choose(); }}>更换</Button>}
               {state.sharing ? <Button danger icon={<StopOutlined />} onClick={() => { void api.stop().catch(fail); }}>停止共享</Button> : <Button type="primary" loading={starting} disabled={!state.nativeReady} icon={<PlayCircleOutlined />} onClick={() => { void start(); }}>开始共享</Button>}
             </div>

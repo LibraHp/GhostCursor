@@ -1,6 +1,8 @@
 # FRP 外网连接
 
-GhostCursor 提供两种视频传输方式。通过 FRP 分享，推荐选择 **WebSocket · FRP 单端口**：视频、鼠标位置和已授权控制共用现有网页端口，不需要 STUN/TURN。另可选 WebRTC，以优先获得较低延迟；该模式的视频不会自动经过网页端口，复杂 NAT 或防火墙环境可能需要 TURN。
+GhostCursor 提供三种视频连接选项。通过 FRP 分享，推荐选择 **WebSocket · FRP 单端口**：视频、鼠标位置和已授权控制共用现有网页端口，不需要 STUN/TURN。另可选普通 WebRTC + STUN/TURN，或 **WebRTC · 固定 UDP**（一个 TCP 网页端口加一个 UDP 媒体端口）。WebRTC 视频不会自动经过网页端口。
+
+如果能额外映射一个 UDP 端口，请参见 [固定 UDP 映射说明](udp-mapping.md)，其中包含 FRP 配置。该模式一次仅支持一位访客，不使用 STUN/TURN；仅增加第二个 TCP 映射无法代替 UDP。
 
 以下功能已加入 0.2.2 源码，按用户要求尚未编译、未测试，现有 0.2.1 安装包不包含这些改动。
 
@@ -38,6 +40,10 @@ TCP 丢包重传、视频缓冲和逐访客编码会增加延迟及 CPU 开销�
 ## 3. 可选：WebRTC 与 TURN
 
 如果希望使用 WebRTC，在相同设置中选择「WebRTC · 低延迟」，填写 STUN/TURN 并保存，再重新开启共享。网页仍经过 FRP，视频和输入使用独立的 WebRTC 连接。仅添加 STUN 不能保证外网直连；直连失败时使用 TURN，或改回 WebSocket。
+
+STUN 可打开「自动配置 STUN」，无需手动复制服务器。来源为 `https://raw.githubusercontent.com/pradt2/always-online-stun/master/valid_hosts_tcp.txt`。该文件是第三方检测到支持 TCP 的地址列表；普通 Chromium WebRTC STUN 使用 UDP，GhostCursor 会随机抽样并仅选用本机 UDP Binding 响应有效的地址，最多配置 3 项，不会将 TCP 列表当作 TURN 中继。
+
+保存或开始共享时获取，缓存 1 小时；缓存过期会在下次保存或共享时刷新，共享中保持两端相同的 ICE 配置。下载最多等待 6 秒，兼容性检测最多约 3 秒，重复请求会合并；失败后自动回退到缓存或默认 STUN。停止共享后可点击「立即更新」，设置页显示当前地址及更新结果。GitHub 列表不通不会阻止使用回退地址开启共享。本机 STUN 响应有效不能证明访客可达或两端可以直连，UDP 被阻断时请用 WebSocket 或 TURN/TCP。
 
 如果已有 TURN 服务，直接填写服务商提供的 URL、账号、密码即可。否则可在有公网 IP 的 Linux 服务器上部署 coturn；它可以与 frps 在同一台服务器运行，但需要独立端口。
 

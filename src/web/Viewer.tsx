@@ -4,7 +4,7 @@ import { ArrowRightOutlined, DesktopOutlined, DisconnectOutlined, ExpandOutlined
 import { videoPoint, type PointerMessage, type Signal } from '../shared/protocol';
 import { DEFAULT_CURSOR, DEFAULT_VIDEO, validCursor, validVideo, VIDEO_PRESETS, type Presentation } from '../shared/settings';
 import { CursorGlyph } from './CursorGlyph';
-import { NETWORK_FAILURE } from '../shared/network';
+import { connectionFailure, transportLabel, type NetworkSettings } from '../shared/network';
 import { RELAY_MIME_TYPES, unpackRelayChunk, validRelayMime } from '../shared/relay';
 import { RelayPlayer } from './relay-player';
 import { POINTER_SEND_INTERVAL } from '../shared/rate-limit';
@@ -22,7 +22,7 @@ export function Viewer() {
   const [decodedSize, setDecodedSize] = useState({ width: 0, height: 0 });
   const [transportName, setTransportName] = useState('');
   const relay = useRef<RelayPlayer | null>(null);
-  const transport = useRef<{ mode: 'webrtc' | 'websocket'; streamId: number; active: boolean }>({ mode: 'webrtc', streamId: 0, active: false });
+  const transport = useRef<{ mode: NetworkSettings['transport']; streamId: number; active: boolean }>({ mode: 'webrtc', streamId: 0, active: false });
   const video = useRef<HTMLVideoElement>(null), stage = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null), pc = useRef<RTCPeerConnection | null>(null), channel = useRef<RTCDataChannel | null>(null);
   const identity = useRef({ id: '', name: '', color: '#2563eb', sessionId: '', epoch: 0, control: false });
@@ -77,7 +77,7 @@ export function Viewer() {
     ws.binaryType = 'arraybuffer';
     socket.current = ws;
     let peer: RTCPeerConnection | null = null;
-    connectionTimer.current = setTimeout(() => { if (socket.current === ws) end(transport.current.mode === 'websocket' ? '视频连接超时，请检查 FRP WebSocket 转发和网络带宽后重新加入' : NETWORK_FAILURE); }, 45000);
+    connectionTimer.current = setTimeout(() => { if (socket.current === ws) end(transport.current.mode === 'websocket' ? '视频连接超时，请检查 FRP WebSocket 转发和网络带宽后重新加入' : connectionFailure(transport.current.mode)); }, 45000);
     let candidates: RTCIceCandidateInit[] = [], chain = Promise.resolve();
     let disconnectTimer: ReturnType<typeof setTimeout> | undefined;
     function signal(value: Signal) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value)); }
@@ -97,7 +97,7 @@ export function Viewer() {
       connection.onconnectionstatechange = () => {
         if (socket.current !== ws) return;
         clearTimeout(disconnectTimer); clearTimeout(iceTimer.current);
-        if (connection.connectionState === 'failed') end(NETWORK_FAILURE);
+        if (connection.connectionState === 'failed') end(connectionFailure(transport.current.mode));
         if (connection.connectionState === 'disconnected') { disconnectTimer = setTimeout(() => { if (socket.current === ws) end('网络连接已中断，请重新加入。'); }, 10000); iceTimer.current = disconnectTimer; }
       };
       return connection;
@@ -120,8 +120,8 @@ export function Viewer() {
         }
         const data = JSON.parse(event.data);
         if (data.type === 'welcome') {
-          const mode = data.transport === 'websocket' ? 'websocket' : 'webrtc';
-          transport.current = { mode, streamId: 0, active: false }; setTransportName(mode === 'websocket' ? 'WebSocket' : 'WebRTC');
+          const mode = data.transport === 'websocket' ? 'websocket' : data.transport === 'webrtc-mapped' ? 'webrtc-mapped' : 'webrtc';
+          transport.current = { mode, streamId: 0, active: false }; setTransportName(transportLabel(mode));
           identity.current = { id: data.id, name: data.name, color: data.color, sessionId: data.sessionId, epoch: 0, control: false }; setColor(data.color); setStatus('网页已连接，正在建立视频连接…');
           if (mode === 'websocket') {
             const mimeTypes = window.MediaSource ? RELAY_MIME_TYPES.filter(mime => MediaSource.isTypeSupported(mime)) : [];

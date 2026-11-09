@@ -9,7 +9,8 @@ import { SharingServer } from './server';
 import { ControlCoordinator } from './control';
 import { SourceCatalog, selectableWindows } from './source-catalog';
 import { validGraphicsMode, useCompatibility, type GraphicsMode } from '../shared/graphics';
-import { DEFAULT_NETWORK, publicOrigin, storedNetwork, validNetwork, type NetworkSettings } from '../shared/network';
+import { DEFAULT_NETWORK, publicOrigin, storedNetwork, validNetwork, type AutoStunResult, type NetworkSettings } from '../shared/network';
+import { AutoStun } from './auto-stun';
 import { validSignal, type HostState, type HostEvent } from '../shared/protocol';
 import { TokenBucket } from '../shared/rate-limit';
 import { DEFAULT_VIDEO, DEFAULT_CURSOR, storedVideo, validVideo, validCursor, validShortcut, type VideoSettings, type CursorSettings } from '../shared/settings';
@@ -36,6 +37,13 @@ let quitting = false;
 let nativeReason = '';
 let sessionHosts = ['127.0.0.1'];
 let network: NetworkSettings = { ...DEFAULT_NETWORK };
+const autoStun = new AutoStun(join(app.getPath('userData'), 'stun-cache.json'));
+let autoStunResult: AutoStunResult | undefined;
+async function configureAutoStun(value: NetworkSettings, force = false): Promise<NetworkSettings> {
+  if (value.transport !== 'webrtc' || !value.autoStun || value.relayOnly) return value;
+  autoStunResult = await autoStun.resolve(force);
+  return { ...value, stunUrls: [...autoStunResult.urls] };
+}
 let video: VideoSettings = { ...DEFAULT_VIDEO }, cursor: CursorSettings = { ...DEFAULT_CURSOR };
 let recordingHotkey = false, recordingTimer: NodeJS.Timeout | undefined;
 let settingsWrite = Promise.resolve();
@@ -53,7 +61,7 @@ function state(): HostState {
   return { sharing: sharing.active, sessionId: sharing.id, visitors: [...sharing.visitors.values()], controller: sharing.controller,
     controlEnabled: sharing.enabled, epoch: sharing.epoch, links: sharing.active ? [...(network.publicUrl ? [`${network.publicUrl}/#${sharing.token}`] : []), ...sessionHosts.map(host => `http://${host}:${port}/#${sharing.token}`)] : [],
     controlPending: controls.pending, controlReason: sharing.controlReason, video, cursor,
-    graphics: { mode: graphicsMode, compatibility, restartRequired: useCompatibility(graphicsMode, windowsBuild) !== compatibility }, network,
+    graphics: { mode: graphicsMode, compatibility, restartRequired: useCompatibility(graphicsMode, windowsBuild) !== compatibility }, network, autoStunResult,
     port, sourceName, hotkey, nativeReady, targetAvailable, error: error || (sharing.active ? nativeReason : '') };
 }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', state()); }
@@ -134,6 +142,10 @@ app.whenReady().then(async () => {
     if (!options || !Number.isInteger(options.port) || options.port < 1024 || options.port > 65535) throw new Error('端口必须在 1024–65535 之间');
     busy = true; error = '';
     try {
+      network = await configureAutoStun(network);
+      const udpPort = network.transport === 'webrtc-mapped' ? network.mappedUdp.localPort : 0;
+      window.webContents.setWebRTCUDPPortRange({ min: udpPort, max: udpPort });
+      server.setNetwork(network);
       const list = await sources(); const selected = list.find(s => s.id === options.sourceId);
       if (!selected || !/^window:\d+:\d+$/.test(selected.id)) throw new Error('窗口已关闭，请刷新列表');
       await native.request('target', { hwnd: selected.id.split(':')[1] });
@@ -149,11 +161,25 @@ app.whenReady().then(async () => {
   handle('disconnect', (id: string, reason?: string) => { if (typeof id === 'string') server.disconnect(id, typeof reason === 'string' ? reason.slice(0, 100) : undefined); });
   handle('set-network', async (value: NetworkSettings) => {
     if (sharing.active || busy) throw new Error('请先停止共享，再修改外网连接设置');
-    if (!validNetwork(value)) throw new Error('请检查公网地址、STUN/TURN 地址和中继账号；强制中继需要填写 TURN');
-    const next: NetworkSettings = { transport: value.transport, publicUrl: publicOrigin(value.publicUrl), stunUrls: [...value.stunUrls], turnUrls: [...value.turnUrls], username: value.username, credential: value.credential, relayOnly: value.relayOnly };
-    const previous = network; network = next;
-    try { await persistSettings(); } catch (e) { network = previous; throw e; }
-    server.setNetwork(network); publish();
+    if (!validNetwork(value)) throw new Error('请检查公网地址、固定 UDP 的 IPv4/端口及 STUN/TURN 设置；强制中继需要填写 TURN');
+    busy = true;
+    const previous = network, previousResult = autoStunResult;
+    try {
+      network = await configureAutoStun({ transport: value.transport, mappedUdp: { ...value.mappedUdp }, autoStun: value.autoStun, publicUrl: publicOrigin(value.publicUrl), stunUrls: [...value.stunUrls], turnUrls: [...value.turnUrls], username: value.username, credential: value.credential, relayOnly: value.relayOnly });
+      await persistSettings(); server.setNetwork(network); publish();
+    } catch (e) { network = previous; autoStunResult = previousResult; throw e; }
+    finally { busy = false; }
+  });
+  handle('refresh-stun', async () => {
+    if (sharing.active || busy) throw new Error('请先停止共享，再更新 STUN 地址');
+    if (network.transport !== 'webrtc' || !network.autoStun || network.relayOnly) throw new Error('请先保存 WebRTC 自动 STUN 设置，并关闭强制 TURN 中继');
+    busy = true;
+    const previous = network, previousResult = autoStunResult;
+    try {
+      network = await configureAutoStun(network, true);
+      await persistSettings(); server.setNetwork(network); publish(); return autoStunResult!;
+    } catch (e) { network = previous; autoStunResult = previousResult; throw e; }
+    finally { busy = false; }
   });
   handle('set-hotkey', async (value: string) => {
     try { registerHotkey(value); recordingHotkey = false; clearTimeout(recordingTimer); await persistSettings(); publish(); }
